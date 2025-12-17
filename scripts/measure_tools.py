@@ -507,10 +507,11 @@ def process_results(
     # Calculate statistics
     total_times = [r.total_ms for r in valid_results]
 
+    # cold_start_ms = total - fn_total
+    # 포함: WASM 모듈 로딩, 런타임 초기화, rmcp 프레임워크 오버헤드 (입력 역직렬화 포함)
     timing = {
         "total_ms": statistics.mean(total_times),
         "cold_start_ms": 0.0,
-        "deserialize_ms": 0.0,  # 입력 역직렬화 시간
         "io_ms": 0.0,
         "compute_ms": 0.0,
         "serialize_ms": 0.0,
@@ -519,7 +520,6 @@ def process_results(
     timing_std = {
         "total_ms": statistics.stdev(total_times) if len(total_times) > 1 else 0.0,
         "cold_start_ms": 0.0,
-        "deserialize_ms": 0.0,
         "io_ms": 0.0,
         "compute_ms": 0.0,
         "serialize_ms": 0.0,
@@ -552,18 +552,13 @@ def process_results(
                 if key != "fn_total_ms":
                     internal_timings_avg[key] = 0.0
 
-        # 새로운 계산 방식:
-        # cold_start = total - fn_total (진짜 콜드스타트: WASM 로드 + 런타임 초기화)
-        # deserialize = fn_total - io - compute - serialize (입력 역직렬화 시간)
+        # cold_start = total - fn_total
+        # 포함: WASM 모듈 로딩, 런타임 초기화, rmcp 프레임워크 오버헤드 (입력 역직렬화 포함)
         fn_total_ms = internal_timings_avg.get("fn_total_ms", 0.0)
         if fn_total_ms > 0:
             timing["cold_start_ms"] = timing["total_ms"] - fn_total_ms
             if timing["cold_start_ms"] < 0:
                 timing["cold_start_ms"] = 0.0
-
-            timing["deserialize_ms"] = fn_total_ms - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
-            if timing["deserialize_ms"] < 0:
-                timing["deserialize_ms"] = 0.0
         else:
             # fn_total_ms가 없는 경우 (이전 방식 호환)
             timing["cold_start_ms"] = timing["total_ms"] - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
@@ -571,7 +566,6 @@ def process_results(
                 timing["cold_start_ms"] = 0.0
 
         internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
-        internal_timings_avg["deserialize_ms"] = timing["deserialize_ms"]
 
     # profiling: 각 컴포넌트의 비율 (%) 계산
     total = timing["total_ms"]
@@ -579,13 +573,12 @@ def process_results(
     if total > 0:
         timing_pct = {
             "cold_start_pct": round(timing["cold_start_ms"] / total * 100, 2),
-            "deserialize_pct": round(timing["deserialize_ms"] / total * 100, 2),
             "io_pct": round(timing["io_ms"] / total * 100, 2),
             "compute_pct": round(timing["compute_ms"] / total * 100, 2),
             "serialize_pct": round(timing["serialize_ms"] / total * 100, 2),
         }
     else:
-        timing_pct = {"cold_start_pct": 0, "deserialize_pct": 0, "io_pct": 0, "compute_pct": 0, "serialize_pct": 0}
+        timing_pct = {"cold_start_pct": 0, "io_pct": 0, "compute_pct": 0, "serialize_pct": 0}
 
     return ToolMeasurement(
         tool_name=tool_name,
@@ -886,6 +879,8 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
 
     for m in cold_measurements:
         key = m.tool_name
+        # cold_start = total - fn_total
+        # 포함: WASM 모듈 로딩, 런타임 초기화, rmcp 프레임워크 오버헤드 (입력 역직렬화 포함)
         summary["tools"][key] = {
             "tool_name": m.tool_name,
             "input_size": m.input_size,
@@ -894,7 +889,6 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
             "timing_ms": {
                 "total": round(m.timing["total_ms"], 3),
                 "cold_start": round(m.timing["cold_start_ms"], 3),
-                "deserialize": round(m.timing.get("deserialize_ms", 0.0), 3),
                 "io": round(m.timing["io_ms"], 3),
                 "compute": round(m.timing["compute_ms"], 3),
                 "serialize": round(m.timing["serialize_ms"], 3),
