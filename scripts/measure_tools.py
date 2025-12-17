@@ -625,16 +625,15 @@ async def run_tool_measurement(
     elif tool_name == "read_media_file":
         img_path = TEST_DATA_DIR / "images" / "test.png"
         if not img_path.exists():
-            img_path = Path("/tmp/test.png")
-            img_path.parent.mkdir(parents=True, exist_ok=True)
-            # Create minimal PNG
-            img_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+            print(f"Test image not found: {img_path}", file=sys.stderr)
+            return None
         payload = {"path": str(img_path)}
 
     elif tool_name == "read_multiple_files":
-        test_file = get_test_file_path("1KB") if get_test_file_path("1KB").exists() else Path("/tmp/test_multi.txt")
+        test_file = get_test_file_path("1KB")
         if not test_file.exists():
-            test_file.write_text("test content")
+            print(f"Test file not found: {test_file}", file=sys.stderr)
+            return None
         payload = {"paths": [str(test_file)]}
 
     elif tool_name == "write_file":
@@ -647,7 +646,7 @@ async def run_tool_measurement(
     elif tool_name == "edit_file":
         test_file = Path("/tmp/wasm_profiler_edit.txt")
         test_file.write_text("hello world\nline two\nline three")
-        payload = {"path": str(test_file), "edits": [{"old_text": "hello", "new_text": "hi"}], "dry_run": True}
+        payload = {"path": str(test_file), "edits": [{"oldText": "hello", "newText": "hi"}], "dryRun": True}
 
     elif tool_name == "create_directory":
         payload = {"path": "/tmp/wasm_profiler_test_dir"}
@@ -655,25 +654,27 @@ async def run_tool_measurement(
     elif tool_name in ["list_directory", "list_directory_with_sizes"]:
         test_dir = get_test_directory_path(input_size_label)
         if not test_dir.exists():
-            test_dir = Path("/tmp")
+            print(f"Test directory not found: {test_dir}", file=sys.stderr)
+            return None
         payload = {"path": str(test_dir)}
 
     elif tool_name == "directory_tree":
-        payload = {"path": "/tmp", "max_depth": 2}
+        payload = {"path": str(TEST_DATA_DIR)}
 
     elif tool_name == "move_file":
+        # move_file은 실제 파일 이동이므로 /tmp 사용
         src = Path("/tmp/wasm_profiler_move_src.txt")
         src.write_text("test")
         payload = {"source": str(src), "destination": "/tmp/wasm_profiler_move_dst.txt"}
 
     elif tool_name == "search_files":
-        payload = {"path": "/tmp", "pattern": "*.txt"}
+        payload = {"path": str(TEST_DATA_DIR / "files"), "pattern": "*.txt"}
 
     elif tool_name == "get_file_info":
         test_file = get_test_file_path("1KB")
         if not test_file.exists():
-            test_file = Path("/tmp/test_info.txt")
-            test_file.write_text("test content")
+            print(f"Test file not found: {test_file}", file=sys.stderr)
+            return None
         payload = {"path": str(test_file)}
 
     elif tool_name == "list_allowed_directories":
@@ -687,11 +688,11 @@ async def run_tool_measurement(
     elif tool_name == "git_show":
         payload = {"repo_path": "/tmp", "revision": "HEAD"}
     elif tool_name == "git_branch":
-        payload = {"repo_path": "/tmp"}
+        payload = {"repo_path": "/tmp", "branch_type": "local"}
     elif tool_name in ["git_diff_unstaged", "git_diff_staged", "git_reset"]:
         payload = {"repo_path": "/tmp"}
     elif tool_name == "git_diff":
-        payload = {"repo_path": "/tmp", "start_commit": "HEAD~1", "end_commit": "HEAD"}
+        payload = {"repo_path": "/tmp", "target": "HEAD"}
     elif tool_name == "git_commit":
         payload = {"repo_path": "/tmp", "message": "test"}
     elif tool_name == "git_add":
@@ -702,24 +703,35 @@ async def run_tool_measurement(
         payload = {"repo_path": "/tmp", "branch_name": "main"}
 
     # ===== image-resize tools =====
-    elif tool_name in ["get_image_info", "compute_image_hash"]:
+    elif tool_name in ["get_image_info", "compute_image_hash", "resize_image"]:
         img_path = TEST_DATA_DIR / "images" / "test.png"
         if not img_path.exists():
-            img_path = Path("/tmp/test.png")
-            img_path.parent.mkdir(parents=True, exist_ok=True)
-            img_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
-        payload = {"path": str(img_path)}
-    elif tool_name == "resize_image":
-        img_path = TEST_DATA_DIR / "images" / "test.png"
-        if not img_path.exists():
-            img_path = Path("/tmp/test.png")
-        payload = {"input_path": str(img_path), "output_path": "/tmp/resized.png", "width": 100, "height": 100}
+            print(f"Test image not found: {img_path}", file=sys.stderr)
+            return None
+        if tool_name == "resize_image":
+            payload = {"image_path": str(img_path), "width": 100, "height": 100}
+        else:
+            payload = {"image_path": str(img_path)}
     elif tool_name == "scan_directory":
-        payload = {"path": "/tmp"}
+        img_dir = TEST_DATA_DIR / "images"
+        if not img_dir.exists():
+            print(f"Test images directory not found: {img_dir}", file=sys.stderr)
+            return None
+        payload = {"directory": str(img_dir)}
     elif tool_name == "compare_hashes":
-        payload = {"hash1": "abc123", "hash2": "abc123"}
+        payload = {
+            "hashes": [
+                {"path": "img1.png", "hash": "0123456789abcdef"},
+                {"path": "img2.png", "hash": "0123456789abcdef"}
+            ],
+            "threshold": 5
+        }
     elif tool_name == "batch_resize":
-        payload = {"input_dir": "/tmp", "output_dir": "/tmp/resized", "width": 100, "height": 100}
+        img_path = TEST_DATA_DIR / "images" / "test.png"
+        if not img_path.exists():
+            print(f"Test image not found: {img_path}", file=sys.stderr)
+            return None
+        payload = {"image_paths": [str(img_path)], "max_size": 100}
 
     # ===== data-aggregate tools =====
     elif tool_name == "aggregate_list":
@@ -744,19 +756,19 @@ async def run_tool_measurement(
         log_content = generate_test_log_content(num_lines)
         entries = [{"timestamp": f"2025-01-01T10:{i:02d}:00", "level": "INFO", "message": f"msg{i}"} for i in range(num_lines)]
         if tool_name == "filter_entries":
-            payload = {"entries": entries, "level": "INFO"}
+            payload = {"entries": entries, "min_level": "info"}
         elif tool_name == "compute_log_statistics":
             payload = {"entries": entries}
         elif tool_name == "search_entries":
             payload = {"entries": entries, "pattern": "msg"}
         elif tool_name == "extract_time_range":
-            payload = {"entries": entries, "start_time": "2025-01-01T10:00:00", "end_time": "2025-01-01T10:30:00"}
+            payload = {"entries": entries}
 
     # ===== summarize tools =====
     elif tool_name == "summarize_text":
         payload = {"text": "This is a test document. " * 50, "max_length": 100}
     elif tool_name == "summarize_documents":
-        payload = {"documents": [{"content": "Doc content " * 20}], "max_length": 100}
+        payload = {"documents": ["Doc content " * 20], "max_length_per_doc": 100}
     elif tool_name == "get_provider_info":
         payload = {}
 
