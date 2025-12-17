@@ -733,21 +733,26 @@ async def run_tool_measurement(
             return None
         payload = {"image_paths": [str(img_path)], "max_size": 100}
 
-    # ===== data-aggregate tools (500개 아이템) =====
+    # ===== data-aggregate tools (100,000개 아이템 → ~5MB) =====
     elif tool_name == "aggregate_list":
-        items = [{"level": ["INFO", "WARN", "ERROR"][i % 3], "value": i * 10} for i in range(500)]
+        # 100,000 items → ~5MB input (이전 테스트: 54MB)
+        items = [{"level": ["INFO", "WARN", "ERROR"][i % 3], "value": i * 10} for i in range(100000)]
         payload = {"items": items, "group_by": "level"}
     elif tool_name == "merge_summaries":
-        summaries = [{"count": i * 10, "total": i * 100} for i in range(500)]
+        # 100,000 items → ~5MB input (이전 테스트: 51MB)
+        summaries = [{"count": i * 10, "total": i * 100} for i in range(100000)]
         payload = {"summaries": summaries}
     elif tool_name == "combine_research_results":
-        results = [{"title": f"Title {i}", "summary": f"Summary content {i} " * 5} for i in range(500)]
+        # 100,000 items with longer content → ~10MB input
+        results = [{"title": f"Title {i}", "summary": f"Summary content {i} " * 10} for i in range(100000)]
         payload = {"results": results}
     elif tool_name == "deduplicate":
-        items = [{"id": i % 250, "name": f"item_{i}"} for i in range(500)]  # 50% duplicates
+        # 100,000 items → ~5MB input (이전 테스트: 54MB)
+        items = [{"id": i % 50000, "name": f"item_{i}"} for i in range(100000)]  # 50% duplicates
         payload = {"items": items, "key_fields": ["id"]}
     elif tool_name == "compute_trends":
-        time_series = [{"timestamp": f"2025-01-{(i%28)+1:02d}", "value": 100 + i * 5} for i in range(500)]
+        # 100,000 time series points → ~5MB input
+        time_series = [{"timestamp": f"2025-01-{(i%28)+1:02d}", "value": 100 + i * 5} for i in range(100000)]
         payload = {"time_series": time_series}
 
     # ===== log-parser tools =====
