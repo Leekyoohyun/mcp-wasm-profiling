@@ -337,14 +337,14 @@ def measure_cold_start(
 
         # Parse response for internal timing
         internal_timing = None
-        wasm_init_ms = None
+        wasm_total_ms = None
 
-        # profiling: stderr에서 ---WASM_INIT--- 및 ---TIMING--- 형식 파싱
+        # profiling: stderr에서 ---WASM_TOTAL--- 및 ---TIMING--- 형식 파싱
         if result.stderr:
             for line in result.stderr.strip().split('\n'):
-                if line.startswith("---WASM_INIT---"):
+                if line.startswith("---WASM_TOTAL---"):
                     try:
-                        wasm_init_ms = float(line[len("---WASM_INIT---"):])
+                        wasm_total_ms = float(line[len("---WASM_TOTAL---"):])
                     except ValueError:
                         pass
                 elif line.startswith("---TIMING---"):
@@ -354,11 +354,11 @@ def measure_cold_start(
                     except json.JSONDecodeError:
                         pass
 
-        # wasm_init_ms를 internal_timing에 추가
-        if wasm_init_ms is not None:
+        # wasm_total_ms를 internal_timing에 추가
+        if wasm_total_ms is not None:
             if internal_timing is None:
                 internal_timing = {}
-            internal_timing["wasm_init_ms"] = wasm_init_ms
+            internal_timing["wasm_total_ms"] = wasm_total_ms
 
         # Fallback: stdout에서 _timing 필드 찾기 (기존 방식)
         if internal_timing is None and result.stdout:
@@ -552,8 +552,8 @@ def process_results(
     if raw_internal_timings:
         internal_timings_avg = {}
 
-        # wasm_init_ms, fn_total_ms, io_ms, compute_ms, serialize_ms 파싱
-        for key in ["wasm_init_ms", "fn_total_ms", "io_ms", "compute_ms", "serialize_ms"]:
+        # wasm_total_ms, fn_total_ms, io_ms, compute_ms, serialize_ms 파싱
+        for key in ["wasm_total_ms", "fn_total_ms", "io_ms", "compute_ms", "serialize_ms"]:
             values = [t.get(key, 0) for t in raw_internal_timings]
             if any(v > 0 for v in values):
                 avg_val = statistics.mean(values)
@@ -565,26 +565,29 @@ def process_results(
             else:
                 internal_timings_avg[key] = 0.0
 
-        # 새로운 분해 계산
-        wasm_init_ms = internal_timings_avg.get("wasm_init_ms", 0.0)
+        # 새로운 분해 계산:
+        # wasm_total = WASM 코드 실행 시간 (lib.rs run() 시작~종료)
+        # wasm_load = total - wasm_total (순수 wasmtime 모듈 로딩)
+        # mcp_overhead = wasm_total - fn_total (Tokio + MCP + 역직렬화)
+        wasm_total_ms = internal_timings_avg.get("wasm_total_ms", 0.0)
         fn_total_ms = internal_timings_avg.get("fn_total_ms", 0.0)
 
-        if wasm_init_ms > 0:
-            # wasm_load = total - wasm_init (순수 WASM 모듈 로딩 시간)
-            timing["wasm_load_ms"] = timing["total_ms"] - wasm_init_ms
+        if wasm_total_ms > 0:
+            # wasm_load = total - wasm_total (순수 wasmtime 모듈 로딩 시간)
+            timing["wasm_load_ms"] = timing["total_ms"] - wasm_total_ms
             if timing["wasm_load_ms"] < 0:
                 timing["wasm_load_ms"] = 0.0
 
             if fn_total_ms > 0:
-                # mcp_overhead = wasm_init - fn_total (Tokio + MCP + 역직렬화)
-                timing["mcp_overhead_ms"] = wasm_init_ms - fn_total_ms
+                # mcp_overhead = wasm_total - fn_total (Tokio + MCP + 역직렬화)
+                timing["mcp_overhead_ms"] = wasm_total_ms - fn_total_ms
                 if timing["mcp_overhead_ms"] < 0:
                     timing["mcp_overhead_ms"] = 0.0
             else:
-                # fn_total이 없으면 wasm_init 전체가 mcp_overhead
-                timing["mcp_overhead_ms"] = wasm_init_ms
+                # fn_total이 없으면 wasm_total 전체가 mcp_overhead
+                timing["mcp_overhead_ms"] = wasm_total_ms
         else:
-            # wasm_init이 없는 경우 (이전 방식 호환)
+            # wasm_total이 없는 경우 (이전 방식 호환)
             if fn_total_ms > 0:
                 timing["wasm_load_ms"] = timing["total_ms"] - fn_total_ms
                 timing["mcp_overhead_ms"] = 0.0
