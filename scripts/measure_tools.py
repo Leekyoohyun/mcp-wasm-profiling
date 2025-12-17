@@ -831,21 +831,23 @@ def save_results(measurements: List[ToolMeasurement], output_file: Path):
 
 
 def save_summary(measurements: List[ToolMeasurement], output_file: Path):
-    """Save summary of all measurements to a single JSON file"""
+    """Save summary of cold-start measurements only"""
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
+    # cold 모드만 필터링
+    cold_measurements = [m for m in measurements if m.mode == "cold"]
+
     summary = {
-        "node": measurements[0].node if measurements else "unknown",
+        "node": cold_measurements[0].node if cold_measurements else "unknown",
         "timestamp": datetime.now().isoformat(),
-        "total_measurements": len(measurements),
+        "total_measurements": len(cold_measurements),
         "tools": {}
     }
 
-    for m in measurements:
-        key = f"{m.tool_name}_{m.input_size_label}_{m.mode}"
+    for m in cold_measurements:
+        key = f"{m.tool_name}_{m.input_size_label}"
         summary["tools"][key] = {
             "tool_name": m.tool_name,
-            "mode": m.mode,
             "input_size": m.input_size,
             "input_size_label": m.input_size_label,
             "runs": m.runs,
@@ -862,7 +864,7 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
     with open(output_file, "w") as f:
         json.dump(summary, f, indent=2)
 
-    print(f"Summary saved to: {output_file}")
+    print(f"Summary saved to: {output_file} (cold mode only)")
 
 
 # =============================================================================
