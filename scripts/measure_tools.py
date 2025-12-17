@@ -72,27 +72,27 @@ SERVER_WASM_MAP = {
     'log-parser': 'mcp_server_log_parser.wasm',
 }
 
-# Tool test configurations
+# Tool test configurations (single size per tool - 비율 측정용)
 TOOL_CONFIGS = {
     "read_file": {
         "description": "Read file contents",
         "server": "filesystem",
-        "test_sizes": ["1KB", "10KB", "100KB", "1MB", "10MB", "50MB"],
+        "test_sizes": ["1MB"],
     },
     "read_text_file": {
         "description": "Read text file with encoding",
         "server": "filesystem",
-        "test_sizes": ["1KB", "10KB", "100KB", "1MB", "10MB", "50MB"],
+        "test_sizes": ["1MB"],
     },
     "write_file": {
         "description": "Write file contents",
         "server": "filesystem",
-        "test_sizes": ["1KB", "10KB", "100KB", "1MB"],
+        "test_sizes": ["1MB"],
     },
     "list_directory": {
         "description": "List directory contents",
         "server": "filesystem",
-        "test_sizes": ["10files", "100files", "1000files"],
+        "test_sizes": ["100files"],
     },
     "get_file_info": {
         "description": "Get file metadata",
@@ -102,7 +102,7 @@ TOOL_CONFIGS = {
     "parse_logs": {
         "description": "Parse log content into structured entries",
         "server": "log-parser",
-        "test_sizes": ["100lines", "1000lines", "10000lines"],
+        "test_sizes": ["1000lines"],
     },
 }
 
