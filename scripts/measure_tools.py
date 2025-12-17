@@ -484,22 +484,29 @@ def process_results(
     }
 
     # Process internal timings if available
-    internal_timings = []
+    raw_internal_timings = []
     for r in valid_results:
         if r.internal_timing:
-            internal_timings.append(r.internal_timing)
+            raw_internal_timings.append(r.internal_timing)
 
-    if internal_timings:
+    # profiling: internal_timings 평균값으로 저장
+    internal_timings_avg = None
+    if raw_internal_timings:
+        internal_timings_avg = {}
         for key in ["io_ms", "serialize_ms", "compute_ms"]:
-            values = [t.get(key, 0) for t in internal_timings]
+            values = [t.get(key, 0) for t in raw_internal_timings]
             if any(v > 0 for v in values):
                 timing[key] = statistics.mean(values)
                 timing_std[key] = statistics.stdev(values) if len(values) > 1 else 0.0
+                internal_timings_avg[key] = timing[key]
+            else:
+                internal_timings_avg[key] = 0.0
 
         # profiling: cold_start = total - io - compute - serialize (overhead 계산)
         timing["cold_start_ms"] = timing["total_ms"] - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
         if timing["cold_start_ms"] < 0:
             timing["cold_start_ms"] = 0.0
+        internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
 
     return ToolMeasurement(
         tool_name=tool_name,
@@ -513,7 +520,7 @@ def process_results(
         timing=timing,
         timing_std=timing_std,
         measurements=total_times,
-        internal_timings=internal_timings if internal_timings else None
+        internal_timings=internal_timings_avg
     )
 
 
