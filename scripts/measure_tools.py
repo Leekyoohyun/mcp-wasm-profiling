@@ -520,13 +520,13 @@ def process_results(
     total_times = [r.total_ms for r in valid_results]
 
     # 새로운 분해 방식:
-    # wasm_load_ms = total - wasm_init (순수 WASM 모듈 로딩)
-    # mcp_overhead_ms = wasm_init - fn_total (Tokio 런타임 + MCP 프레임워크 + 역직렬화)
+    # wasm_load_ms = total - wasm_total (순수 WASM 모듈 로딩)
+    # deserialize_ms = wasm_total - fn_total (Tokio 런타임 + MCP 프레임워크 + 역직렬화)
     # fn_total = io + compute + serialize (함수 본체)
     timing = {
         "total_ms": statistics.mean(total_times),
         "wasm_load_ms": 0.0,       # 순수 WASM 모듈 로딩
-        "mcp_overhead_ms": 0.0,    # Tokio + MCP + 역직렬화
+        "deserialize_ms": 0.0,     # Tokio + MCP + 역직렬화 (대부분 역직렬화)
         "io_ms": 0.0,
         "compute_ms": 0.0,
         "serialize_ms": 0.0,
@@ -535,7 +535,7 @@ def process_results(
     timing_std = {
         "total_ms": statistics.stdev(total_times) if len(total_times) > 1 else 0.0,
         "wasm_load_ms": 0.0,
-        "mcp_overhead_ms": 0.0,
+        "deserialize_ms": 0.0,
         "io_ms": 0.0,
         "compute_ms": 0.0,
         "serialize_ms": 0.0,
@@ -579,24 +579,24 @@ def process_results(
                 timing["wasm_load_ms"] = 0.0
 
             if fn_total_ms > 0:
-                # mcp_overhead = wasm_total - fn_total (Tokio + MCP + 역직렬화)
-                timing["mcp_overhead_ms"] = wasm_total_ms - fn_total_ms
-                if timing["mcp_overhead_ms"] < 0:
-                    timing["mcp_overhead_ms"] = 0.0
+                # deserialize = wasm_total - fn_total (대부분 역직렬화 시간)
+                timing["deserialize_ms"] = wasm_total_ms - fn_total_ms
+                if timing["deserialize_ms"] < 0:
+                    timing["deserialize_ms"] = 0.0
             else:
-                # fn_total이 없으면 wasm_total 전체가 mcp_overhead
-                timing["mcp_overhead_ms"] = wasm_total_ms
+                # fn_total이 없으면 wasm_total 전체가 deserialize
+                timing["deserialize_ms"] = wasm_total_ms
         else:
             # wasm_total이 없는 경우 (이전 방식 호환)
             if fn_total_ms > 0:
                 timing["wasm_load_ms"] = timing["total_ms"] - fn_total_ms
-                timing["mcp_overhead_ms"] = 0.0
+                timing["deserialize_ms"] = 0.0
             else:
                 timing["wasm_load_ms"] = timing["total_ms"] - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
-                timing["mcp_overhead_ms"] = 0.0
+                timing["deserialize_ms"] = 0.0
 
         internal_timings_avg["wasm_load_ms"] = timing["wasm_load_ms"]
-        internal_timings_avg["mcp_overhead_ms"] = timing["mcp_overhead_ms"]
+        internal_timings_avg["deserialize_ms"] = timing["deserialize_ms"]
 
     # profiling: 각 컴포넌트의 비율 (%) 계산
     total = timing["total_ms"]
@@ -604,13 +604,13 @@ def process_results(
     if total > 0:
         timing_pct = {
             "wasm_load_pct": round(timing["wasm_load_ms"] / total * 100, 2),
-            "mcp_overhead_pct": round(timing["mcp_overhead_ms"] / total * 100, 2),
+            "deserialize_pct": round(timing["deserialize_ms"] / total * 100, 2),
             "io_pct": round(timing["io_ms"] / total * 100, 2),
             "compute_pct": round(timing["compute_ms"] / total * 100, 2),
             "serialize_pct": round(timing["serialize_ms"] / total * 100, 2),
         }
     else:
-        timing_pct = {"wasm_load_pct": 0, "mcp_overhead_pct": 0, "io_pct": 0, "compute_pct": 0, "serialize_pct": 0}
+        timing_pct = {"wasm_load_pct": 0, "deserialize_pct": 0, "io_pct": 0, "compute_pct": 0, "serialize_pct": 0}
 
     return ToolMeasurement(
         tool_name=tool_name,
@@ -912,8 +912,8 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
     for m in cold_measurements:
         key = m.tool_name
         # 새로운 분해:
-        # wasm_load = total - wasm_init (순수 WASM 모듈 로딩)
-        # mcp_overhead = wasm_init - fn_total (Tokio + MCP + 역직렬화)
+        # wasm_load = total - wasm_total (순수 WASM 모듈 로딩)
+        # deserialize = wasm_total - fn_total (대부분 역직렬화 시간)
         summary["tools"][key] = {
             "tool_name": m.tool_name,
             "input_size": m.input_size,
@@ -922,7 +922,7 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
             "timing_ms": {
                 "total": round(m.timing["total_ms"], 3),
                 "wasm_load": round(m.timing["wasm_load_ms"], 3),
-                "mcp_overhead": round(m.timing["mcp_overhead_ms"], 3),
+                "deserialize": round(m.timing["deserialize_ms"], 3),
                 "io": round(m.timing["io_ms"], 3),
                 "compute": round(m.timing["compute_ms"], 3),
                 "serialize": round(m.timing["serialize_ms"], 3),
