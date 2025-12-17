@@ -227,7 +227,7 @@ def measure_cold_start(
     wasm_path: Path,
     tool_name: str,
     payload: Dict[str, Any],
-    allowed_dir: str = "/tmp"
+    allowed_dirs: list = None
 ) -> TimingResult:
     """
     Measure cold start using subprocess (new wasmtime process each time).
@@ -241,11 +241,19 @@ def measure_cold_start(
     # Create JSON-RPC input
     json_input = create_jsonrpc_messages(tool_name, payload)
 
+    # CCGrid-2026: 여러 디렉토리 허용
+    if allowed_dirs is None:
+        allowed_dirs = ["/tmp"]
+
+    dir_args = []
+    for d in allowed_dirs:
+        dir_args.extend(["--dir", d])
+
     start_time = time.perf_counter()
 
     try:
         result = subprocess.run(
-            ["wasmtime", "run", f"--dir={allowed_dir}", str(wasm_path)],
+            ["wasmtime", "run"] + dir_args + [str(wasm_path)],
             input=json_input,
             capture_output=True,
             text=True,
@@ -257,7 +265,19 @@ def measure_cold_start(
 
         # Parse response for internal timing
         internal_timing = None
-        if result.stdout:
+
+        # CCGrid-2026: stderr에서 ---TIMING--- 형식 파싱
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                if line.startswith("---TIMING---"):
+                    try:
+                        timing_json = line[len("---TIMING---"):]
+                        internal_timing = json.loads(timing_json)
+                    except json.JSONDecodeError:
+                        pass
+
+        # Fallback: stdout에서 _timing 필드 찾기 (기존 방식)
+        if internal_timing is None and result.stdout:
             for line in result.stdout.strip().split('\n'):
                 try:
                     response = json.loads(line)
@@ -292,7 +312,7 @@ def measure_cold_start_multiple(
     payload: Dict[str, Any],
     runs: int = DEFAULT_RUNS,
     warmup_runs: int = DEFAULT_WARMUP_RUNS,
-    allowed_dir: str = "/tmp"
+    allowed_dirs: list = None
 ) -> List[TimingResult]:
     """Run multiple cold start measurements (synchronous, subprocess-based)"""
     results = []
@@ -300,14 +320,14 @@ def measure_cold_start_multiple(
     # Warmup runs
     print(f"    Warmup ({warmup_runs})...", end="", flush=True)
     for _ in range(warmup_runs):
-        measure_cold_start(wasm_path, tool_name, payload, allowed_dir)
+        measure_cold_start(wasm_path, tool_name, payload, allowed_dirs)
         print(".", end="", flush=True)
     print(" done")
 
     # Actual measurements
     print(f"    Measuring ({runs})...", end="", flush=True)
     for i in range(runs):
-        result = measure_cold_start(wasm_path, tool_name, payload, allowed_dir)
+        result = measure_cold_start(wasm_path, tool_name, payload, allowed_dirs)
         result.run_id = i + 1
         results.append(result)
         print(".", end="", flush=True)
@@ -327,7 +347,7 @@ async def measure_warm_start_multiple(
     payload: Dict[str, Any],
     runs: int = DEFAULT_RUNS,
     warmup_runs: int = DEFAULT_WARMUP_RUNS,
-    allowed_dir: str = "/tmp"
+    allowed_dirs: list = None
 ) -> List[TimingResult]:
     """
     Measure warm start - reuses same session for all measurements.
@@ -337,6 +357,10 @@ async def measure_warm_start_multiple(
     - WASM module already loaded
     - Only measures tool execution time
     """
+    # CCGrid-2026: 여러 디렉토리 중 첫 번째 사용 (MCP client 제약)
+    if allowed_dirs is None:
+        allowed_dirs = ["/tmp"]
+    allowed_dir = allowed_dirs[0]
     server_config = MCPServerConfig.wasmmcp_stdio(allowed_dir, str(wasm_path))
     client = MultiServerMCPClient({server_name: server_config.config})
 
@@ -465,7 +489,7 @@ async def run_tool_measurement(
     input_size_label: str,
     mode: str = "cold",
     runs: int = DEFAULT_RUNS,
-    allowed_dir: str = "/tmp"
+    allowed_dirs: list = None
 ) -> Optional[ToolMeasurement]:
     """Run measurement for a single tool with specified input size"""
 
@@ -525,18 +549,22 @@ async def run_tool_measurement(
 
     print(f"\n[{tool_name}] Input: {input_size_label}, Mode: {mode}")
 
+    # CCGrid-2026: 기본 디렉토리 설정 (test_data + /tmp)
+    if allowed_dirs is None:
+        allowed_dirs = [str(TEST_DATA_DIR), "/tmp"]
+
     # Run measurements
     if mode == "cold":
         # Cold start: subprocess (synchronous) - new process each time
         results = measure_cold_start_multiple(
             wasm_file, tool_name, payload,
-            runs=runs, allowed_dir=allowed_dir
+            runs=runs, allowed_dirs=allowed_dirs
         )
     else:  # warm
         # Warm start: MCP client (async) - reuse session
         results = await measure_warm_start_multiple(
             server_name, wasm_file, tool_name, payload,
-            runs=runs, allowed_dir=allowed_dir
+            runs=runs, allowed_dirs=allowed_dirs
         )
 
     # Process results
