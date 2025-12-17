@@ -134,6 +134,24 @@ create_random_binary 1048576 "${TEST_DATA_DIR}/images/test_1MB.bin"
 create_random_binary 5242880 "${TEST_DATA_DIR}/images/test_5MB.bin"
 create_random_binary 10485760 "${TEST_DATA_DIR}/images/test_10MB.bin"
 
+echo ""
+echo "=== Creating Real PNG Images (for image-resize tools) ==="
+
+# 1000x1000 PNG 이미지 생성 (PIL 사용)
+python3 -c "
+from PIL import Image
+import random
+
+# 1000x1000 랜덤 컬러 이미지
+img = Image.new('RGB', (1000, 1000))
+pixels = img.load()
+for i in range(1000):
+    for j in range(1000):
+        pixels[i, j] = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+img.save('${TEST_DATA_DIR}/images/test.png')
+print('Created 1000x1000 PNG: test.png')
+" 2>/dev/null || echo "Warning: PIL not available, skipping PNG creation"
+
 # =============================================================================
 # Create Test Directories
 # =============================================================================

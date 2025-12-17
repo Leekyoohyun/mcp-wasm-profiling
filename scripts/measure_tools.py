@@ -81,11 +81,11 @@ SERVER_WASM_MAP = {
 # Tool test configurations (single size per tool - 비율 측정용)
 TOOL_CONFIGS = {
     # ===== filesystem (14 tools) =====
-    "read_file": {"server": "filesystem", "test_sizes": ["1MB"]},
-    "read_text_file": {"server": "filesystem", "test_sizes": ["1MB"]},
+    "read_file": {"server": "filesystem", "test_sizes": ["10MB"]},
+    "read_text_file": {"server": "filesystem", "test_sizes": ["10MB"]},
     "read_media_file": {"server": "filesystem", "test_sizes": ["default"]},
     "read_multiple_files": {"server": "filesystem", "test_sizes": ["default"]},
-    "write_file": {"server": "filesystem", "test_sizes": ["1MB"]},
+    "write_file": {"server": "filesystem", "test_sizes": ["10MB"]},
     "edit_file": {"server": "filesystem", "test_sizes": ["default"]},
     "create_directory": {"server": "filesystem", "test_sizes": ["default"]},
     "list_directory": {"server": "filesystem", "test_sizes": ["100files"]},
@@ -733,17 +733,22 @@ async def run_tool_measurement(
             return None
         payload = {"image_paths": [str(img_path)], "max_size": 100}
 
-    # ===== data-aggregate tools =====
+    # ===== data-aggregate tools (100개 아이템) =====
     elif tool_name == "aggregate_list":
-        payload = {"items": [{"level": "INFO", "value": 10}, {"level": "ERROR", "value": 20}], "group_by": "level"}
+        items = [{"level": ["INFO", "WARN", "ERROR"][i % 3], "value": i * 10} for i in range(100)]
+        payload = {"items": items, "group_by": "level"}
     elif tool_name == "merge_summaries":
-        payload = {"summaries": [{"count": 10}, {"count": 20}]}
+        summaries = [{"count": i * 10, "total": i * 100} for i in range(100)]
+        payload = {"summaries": summaries}
     elif tool_name == "combine_research_results":
-        payload = {"results": [{"title": "A", "summary": "B"}]}
+        results = [{"title": f"Title {i}", "summary": f"Summary content {i} " * 10} for i in range(100)]
+        payload = {"results": results}
     elif tool_name == "deduplicate":
-        payload = {"items": [{"id": 1}, {"id": 1}, {"id": 2}], "key_fields": ["id"]}
+        items = [{"id": i % 50, "name": f"item_{i}"} for i in range(100)]  # 50% duplicates
+        payload = {"items": items, "key_fields": ["id"]}
     elif tool_name == "compute_trends":
-        payload = {"time_series": [{"timestamp": "2025-01-01", "value": 10}, {"timestamp": "2025-01-02", "value": 20}]}
+        time_series = [{"timestamp": f"2025-01-{i+1:02d}", "value": 100 + i * 5} for i in range(100)]
+        payload = {"time_series": time_series}
 
     # ===== log-parser tools =====
     elif tool_name == "parse_logs":
@@ -786,7 +791,11 @@ async def run_tool_measurement(
         print(f"Tool {tool_name} not yet configured", file=sys.stderr)
         return None
 
-    print(f"\n[{tool_name}] Input: {input_size_label}, Mode: {mode}")
+    # input_size가 0이면 payload 크기로 계산
+    if input_size == 0 and payload:
+        input_size = len(json.dumps(payload))
+
+    print(f"\n[{tool_name}] Input: {input_size_label} ({input_size} bytes), Mode: {mode}")
 
     # profiling: 기본 디렉토리 설정 (test_data + /tmp)
     if allowed_dirs is None:
@@ -845,7 +854,7 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
     }
 
     for m in cold_measurements:
-        key = f"{m.tool_name}_{m.input_size_label}"
+        key = m.tool_name
         summary["tools"][key] = {
             "tool_name": m.tool_name,
             "input_size": m.input_size,
