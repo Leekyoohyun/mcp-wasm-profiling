@@ -126,23 +126,23 @@ TOOL_CONFIGS = {
     "compute_trends": {"server": "data-aggregate", "test_sizes": ["default"]},
 
     # ===== log-parser (5 tools) =====
-    "parse_logs": {"server": "log-parser", "test_sizes": ["100lines"]},
-    "filter_entries": {"server": "log-parser", "test_sizes": ["100lines"]},
-    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["100lines"]},
-    "search_entries": {"server": "log-parser", "test_sizes": ["100lines"]},
-    "extract_time_range": {"server": "log-parser", "test_sizes": ["100lines"]},
+    "parse_logs": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "filter_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"]},
 
-    # ===== summarize (3 tools) =====
-    "summarize_text": {"server": "summarize", "test_sizes": ["default"]},
-    "summarize_documents": {"server": "summarize", "test_sizes": ["default"]},
-    "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
+    # ===== summarize (3 tools) - SKIP: requires LLM API key =====
+    # "summarize_text": {"server": "summarize", "test_sizes": ["default"]},
+    # "summarize_documents": {"server": "summarize", "test_sizes": ["default"]},
+    # "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
 
     # ===== time (2 tools) =====
     "get_current_time": {"server": "time", "test_sizes": ["default"]},
     "convert_time": {"server": "time", "test_sizes": ["default"]},
 
-    # ===== fetch (1 tool) =====
-    "fetch": {"server": "fetch", "test_sizes": ["default"]},
+    # ===== fetch (1 tool) - SKIP: network dependent =====
+    # "fetch": {"server": "fetch", "test_sizes": ["default"]},
 }
 
 
@@ -733,21 +733,21 @@ async def run_tool_measurement(
             return None
         payload = {"image_paths": [str(img_path)], "max_size": 100}
 
-    # ===== data-aggregate tools (100개 아이템) =====
+    # ===== data-aggregate tools (500개 아이템) =====
     elif tool_name == "aggregate_list":
-        items = [{"level": ["INFO", "WARN", "ERROR"][i % 3], "value": i * 10} for i in range(100)]
+        items = [{"level": ["INFO", "WARN", "ERROR"][i % 3], "value": i * 10} for i in range(500)]
         payload = {"items": items, "group_by": "level"}
     elif tool_name == "merge_summaries":
-        summaries = [{"count": i * 10, "total": i * 100} for i in range(100)]
+        summaries = [{"count": i * 10, "total": i * 100} for i in range(500)]
         payload = {"summaries": summaries}
     elif tool_name == "combine_research_results":
-        results = [{"title": f"Title {i}", "summary": f"Summary content {i} " * 10} for i in range(100)]
+        results = [{"title": f"Title {i}", "summary": f"Summary content {i} " * 5} for i in range(500)]
         payload = {"results": results}
     elif tool_name == "deduplicate":
-        items = [{"id": i % 50, "name": f"item_{i}"} for i in range(100)]  # 50% duplicates
+        items = [{"id": i % 250, "name": f"item_{i}"} for i in range(500)]  # 50% duplicates
         payload = {"items": items, "key_fields": ["id"]}
     elif tool_name == "compute_trends":
-        time_series = [{"timestamp": f"2025-01-{i+1:02d}", "value": 100 + i * 5} for i in range(100)]
+        time_series = [{"timestamp": f"2025-01-{(i%28)+1:02d}", "value": 100 + i * 5} for i in range(500)]
         payload = {"time_series": time_series}
 
     # ===== log-parser tools =====
