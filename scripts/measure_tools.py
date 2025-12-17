@@ -69,6 +69,7 @@ for path in WASM_PATH_CANDIDATES:
 # Server WASM mapping
 SERVER_WASM_MAP = {
     'filesystem': 'mcp_server_filesystem.wasm',
+    'log-parser': 'mcp_server_log_parser.wasm',
 }
 
 # Tool test configurations
@@ -97,6 +98,11 @@ TOOL_CONFIGS = {
         "description": "Get file metadata",
         "server": "filesystem",
         "test_sizes": ["default"],
+    },
+    "parse_logs": {
+        "description": "Parse log content into structured entries",
+        "server": "log-parser",
+        "test_sizes": ["100lines", "1000lines", "10000lines"],
     },
 }
 
@@ -186,6 +192,32 @@ def get_test_directory_path(size_label: str) -> Path:
     return TEST_DATA_DIR / "directories" / size_label
 
 
+def generate_test_log_content(num_lines: int) -> str:
+    """Generate test log content in Apache combined format"""
+    import random
+
+    ips = ["192.168.1.100", "10.0.0.50", "172.16.0.25", "8.8.8.8", "1.2.3.4"]
+    methods = ["GET", "POST", "PUT", "DELETE"]
+    paths = ["/api/users", "/api/data", "/index.html", "/static/js/app.js", "/favicon.ico"]
+    statuses = [200, 200, 200, 301, 400, 404, 500]
+    agents = ["Mozilla/5.0", "curl/7.68.0", "Python-requests/2.25.1"]
+
+    lines = []
+    for i in range(num_lines):
+        ip = random.choice(ips)
+        method = random.choice(methods)
+        path = random.choice(paths)
+        status = random.choice(statuses)
+        size = random.randint(100, 50000)
+        agent = random.choice(agents)
+        timestamp = f"17/Dec/2025:10:{i % 60:02d}:{i % 60:02d} +0000"
+
+        line = f'{ip} - - [{timestamp}] "{method} {path} HTTP/1.1" {status} {size} "-" "{agent}"'
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 # =============================================================================
 # Cold Start Measurement (subprocess - new process each time)
 # =============================================================================
@@ -241,7 +273,7 @@ def measure_cold_start(
     # Create JSON-RPC input
     json_input = create_jsonrpc_messages(tool_name, payload)
 
-    # CCGrid-2026: 여러 디렉토리 허용
+    # profiling: 여러 디렉토리 허용
     if allowed_dirs is None:
         allowed_dirs = ["/tmp"]
 
@@ -266,7 +298,7 @@ def measure_cold_start(
         # Parse response for internal timing
         internal_timing = None
 
-        # CCGrid-2026: stderr에서 ---TIMING--- 형식 파싱
+        # profiling: stderr에서 ---TIMING--- 형식 파싱
         if result.stderr:
             for line in result.stderr.strip().split('\n'):
                 if line.startswith("---TIMING---"):
@@ -357,7 +389,7 @@ async def measure_warm_start_multiple(
     - WASM module already loaded
     - Only measures tool execution time
     """
-    # CCGrid-2026: 여러 디렉토리 중 첫 번째 사용 (MCP client 제약)
+    # profiling: 여러 디렉토리 중 첫 번째 사용 (MCP client 제약)
     if allowed_dirs is None:
         allowed_dirs = ["/tmp"]
     allowed_dir = allowed_dirs[0]
@@ -458,11 +490,16 @@ def process_results(
             internal_timings.append(r.internal_timing)
 
     if internal_timings:
-        for key in ["io_ms", "serialize_ms", "compute_ms", "cold_start_ms"]:
+        for key in ["io_ms", "serialize_ms", "compute_ms"]:
             values = [t.get(key, 0) for t in internal_timings]
             if any(v > 0 for v in values):
                 timing[key] = statistics.mean(values)
                 timing_std[key] = statistics.stdev(values) if len(values) > 1 else 0.0
+
+        # profiling: cold_start = total - io - compute - serialize (overhead 계산)
+        timing["cold_start_ms"] = timing["total_ms"] - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
+        if timing["cold_start_ms"] < 0:
+            timing["cold_start_ms"] = 0.0
 
     return ToolMeasurement(
         tool_name=tool_name,
@@ -543,13 +580,20 @@ async def run_tool_measurement(
             test_file.write_text("test content")
         payload = {"path": str(test_file)}
 
+    elif tool_name == "parse_logs":
+        # Generate log content based on size
+        num_lines = int(input_size_label.replace("lines", ""))
+        log_content = generate_test_log_content(num_lines)
+        payload = {"log_content": log_content, "format_type": "auto"}
+        input_size = len(log_content)
+
     else:
         print(f"Tool {tool_name} not yet configured", file=sys.stderr)
         return None
 
     print(f"\n[{tool_name}] Input: {input_size_label}, Mode: {mode}")
 
-    # CCGrid-2026: 기본 디렉토리 설정 (test_data + /tmp)
+    # profiling: 기본 디렉토리 설정 (test_data + /tmp)
     if allowed_dirs is None:
         allowed_dirs = [str(TEST_DATA_DIR), "/tmp"]
 
