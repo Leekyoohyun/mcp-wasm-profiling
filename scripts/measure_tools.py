@@ -187,18 +187,50 @@ def get_test_directory_path(size_label: str) -> Path:
 
 
 # =============================================================================
-# Cold Start Measurement
+# Cold Start Measurement (subprocess - new process each time)
 # =============================================================================
 
-async def measure_cold_start(
-    server_name: str,
+import subprocess
+
+def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
+    """Create JSON-RPC messages for MCP tool call"""
+    init_request = json.dumps({
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "id": 1,
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "wasm-profiler", "version": "1.0.0"}
+        }
+    })
+
+    init_notification = json.dumps({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    })
+
+    tool_request = json.dumps({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": 2,
+        "params": {
+            "name": tool_name,
+            "arguments": arguments
+        }
+    })
+
+    return f"{init_request}\n{init_notification}\n{tool_request}\n"
+
+
+def measure_cold_start(
     wasm_path: Path,
     tool_name: str,
     payload: Dict[str, Any],
     allowed_dir: str = "/tmp"
 ) -> TimingResult:
     """
-    Measure cold start - creates new session for each measurement.
+    Measure cold start using subprocess (new wasmtime process each time).
 
     Cold start includes:
     - wasmtime process spawn
@@ -206,29 +238,39 @@ async def measure_cold_start(
     - MCP initialization
     - Tool execution
     """
-    server_config = MCPServerConfig.wasmmcp_stdio(allowed_dir, str(wasm_path))
-    client = MultiServerMCPClient({server_name: server_config.config})
+    # Create JSON-RPC input
+    json_input = create_jsonrpc_messages(tool_name, payload)
 
     start_time = time.perf_counter()
 
     try:
-        async with client.session(server_name) as session:
-            tools = await load_mcp_tools(session)
-            tool_map = {t.name: t for t in tools}
-
-            if tool_name not in tool_map:
-                return TimingResult(run_id=0, total_ms=-1)
-
-            tool_obj = tool_map[tool_name]
-            result = await tool_obj.ainvoke(payload)
+        result = subprocess.run(
+            ["wasmtime", "run", f"--dir={allowed_dir}", str(wasm_path)],
+            input=json_input,
+            capture_output=True,
+            text=True,
+            timeout=60.0
+        )
 
         end_time = time.perf_counter()
         total_ms = (end_time - start_time) * 1000
 
-        # Extract internal timing if available
+        # Parse response for internal timing
         internal_timing = None
-        if isinstance(result, dict) and "_timing" in result:
-            internal_timing = result["_timing"]
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                try:
+                    response = json.loads(line)
+                    if "result" in response and isinstance(response["result"], dict):
+                        if "_timing" in response["result"]:
+                            internal_timing = response["result"]["_timing"]
+                except json.JSONDecodeError:
+                    continue
+
+        # Check for errors
+        if result.returncode != 0:
+            print(f"    wasmtime error: {result.stderr[:100]}", file=sys.stderr)
+            return TimingResult(run_id=0, total_ms=-1)
 
         return TimingResult(
             run_id=0,
@@ -236,13 +278,15 @@ async def measure_cold_start(
             internal_timing=internal_timing
         )
 
+    except subprocess.TimeoutExpired:
+        print(f"    Timeout", file=sys.stderr)
+        return TimingResult(run_id=0, total_ms=-1)
     except Exception as e:
         print(f"    Error: {e}", file=sys.stderr)
         return TimingResult(run_id=0, total_ms=-1)
 
 
-async def measure_cold_start_multiple(
-    server_name: str,
+def measure_cold_start_multiple(
     wasm_path: Path,
     tool_name: str,
     payload: Dict[str, Any],
@@ -250,20 +294,20 @@ async def measure_cold_start_multiple(
     warmup_runs: int = DEFAULT_WARMUP_RUNS,
     allowed_dir: str = "/tmp"
 ) -> List[TimingResult]:
-    """Run multiple cold start measurements"""
+    """Run multiple cold start measurements (synchronous, subprocess-based)"""
     results = []
 
     # Warmup runs
     print(f"    Warmup ({warmup_runs})...", end="", flush=True)
     for _ in range(warmup_runs):
-        await measure_cold_start(server_name, wasm_path, tool_name, payload, allowed_dir)
+        measure_cold_start(wasm_path, tool_name, payload, allowed_dir)
         print(".", end="", flush=True)
     print(" done")
 
     # Actual measurements
     print(f"    Measuring ({runs})...", end="", flush=True)
     for i in range(runs):
-        result = await measure_cold_start(server_name, wasm_path, tool_name, payload, allowed_dir)
+        result = measure_cold_start(wasm_path, tool_name, payload, allowed_dir)
         result.run_id = i + 1
         results.append(result)
         print(".", end="", flush=True)
@@ -483,11 +527,13 @@ async def run_tool_measurement(
 
     # Run measurements
     if mode == "cold":
-        results = await measure_cold_start_multiple(
-            server_name, wasm_file, tool_name, payload,
+        # Cold start: subprocess (synchronous) - new process each time
+        results = measure_cold_start_multiple(
+            wasm_file, tool_name, payload,
             runs=runs, allowed_dir=allowed_dir
         )
     else:  # warm
+        # Warm start: MCP client (async) - reuse session
         results = await measure_warm_start_multiple(
             server_name, wasm_file, tool_name, payload,
             runs=runs, allowed_dir=allowed_dir
