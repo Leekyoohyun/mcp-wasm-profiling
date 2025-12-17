@@ -51,8 +51,8 @@ RESULTS_DIR = Path(__file__).parent.parent / "results"
 TEST_DATA_DIR = Path(__file__).parent.parent / "test_data"
 
 # Default test configurations
-DEFAULT_RUNS = 10
-DEFAULT_WARMUP_RUNS = 3
+DEFAULT_RUNS = 3
+DEFAULT_WARMUP_RUNS = 1
 
 # WASM binary locations
 WASM_PATH_CANDIDATES = [
@@ -69,41 +69,80 @@ for path in WASM_PATH_CANDIDATES:
 # Server WASM mapping
 SERVER_WASM_MAP = {
     'filesystem': 'mcp_server_filesystem.wasm',
+    'git': 'mcp_server_git.wasm',
+    'image-resize': 'mcp_server_image_resize.wasm',
+    'data-aggregate': 'mcp_server_data_aggregate.wasm',
     'log-parser': 'mcp_server_log_parser.wasm',
+    'summarize': 'mcp_server_summarize.wasm',
+    'time': 'mcp_server_time.wasm',
+    'fetch': 'mcp_server_fetch.wasm',
 }
 
 # Tool test configurations (single size per tool - 비율 측정용)
 TOOL_CONFIGS = {
-    "read_file": {
-        "description": "Read file contents",
-        "server": "filesystem",
-        "test_sizes": ["1MB"],
-    },
-    "read_text_file": {
-        "description": "Read text file with encoding",
-        "server": "filesystem",
-        "test_sizes": ["1MB"],
-    },
-    "write_file": {
-        "description": "Write file contents",
-        "server": "filesystem",
-        "test_sizes": ["1MB"],
-    },
-    "list_directory": {
-        "description": "List directory contents",
-        "server": "filesystem",
-        "test_sizes": ["100files"],
-    },
-    "get_file_info": {
-        "description": "Get file metadata",
-        "server": "filesystem",
-        "test_sizes": ["default"],
-    },
-    "parse_logs": {
-        "description": "Parse log content into structured entries",
-        "server": "log-parser",
-        "test_sizes": ["1000lines"],
-    },
+    # ===== filesystem (14 tools) =====
+    "read_file": {"server": "filesystem", "test_sizes": ["1MB"]},
+    "read_text_file": {"server": "filesystem", "test_sizes": ["1MB"]},
+    "read_media_file": {"server": "filesystem", "test_sizes": ["default"]},
+    "read_multiple_files": {"server": "filesystem", "test_sizes": ["default"]},
+    "write_file": {"server": "filesystem", "test_sizes": ["1MB"]},
+    "edit_file": {"server": "filesystem", "test_sizes": ["default"]},
+    "create_directory": {"server": "filesystem", "test_sizes": ["default"]},
+    "list_directory": {"server": "filesystem", "test_sizes": ["100files"]},
+    "list_directory_with_sizes": {"server": "filesystem", "test_sizes": ["100files"]},
+    "directory_tree": {"server": "filesystem", "test_sizes": ["default"]},
+    "move_file": {"server": "filesystem", "test_sizes": ["default"]},
+    "search_files": {"server": "filesystem", "test_sizes": ["default"]},
+    "get_file_info": {"server": "filesystem", "test_sizes": ["default"]},
+    "list_allowed_directories": {"server": "filesystem", "test_sizes": ["default"]},
+
+    # ===== git (12 tools) =====
+    "git_status": {"server": "git", "test_sizes": ["default"]},
+    "git_log": {"server": "git", "test_sizes": ["default"]},
+    "git_show": {"server": "git", "test_sizes": ["default"]},
+    "git_branch": {"server": "git", "test_sizes": ["default"]},
+    "git_diff_unstaged": {"server": "git", "test_sizes": ["default"]},
+    "git_diff_staged": {"server": "git", "test_sizes": ["default"]},
+    "git_diff": {"server": "git", "test_sizes": ["default"]},
+    "git_commit": {"server": "git", "test_sizes": ["default"]},
+    "git_add": {"server": "git", "test_sizes": ["default"]},
+    "git_reset": {"server": "git", "test_sizes": ["default"]},
+    "git_create_branch": {"server": "git", "test_sizes": ["default"]},
+    "git_checkout": {"server": "git", "test_sizes": ["default"]},
+
+    # ===== image-resize (6 tools) =====
+    "get_image_info": {"server": "image-resize", "test_sizes": ["default"]},
+    "resize_image": {"server": "image-resize", "test_sizes": ["default"]},
+    "scan_directory": {"server": "image-resize", "test_sizes": ["default"]},
+    "compute_image_hash": {"server": "image-resize", "test_sizes": ["default"]},
+    "compare_hashes": {"server": "image-resize", "test_sizes": ["default"]},
+    "batch_resize": {"server": "image-resize", "test_sizes": ["default"]},
+
+    # ===== data-aggregate (5 tools) =====
+    "aggregate_list": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "merge_summaries": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "combine_research_results": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "deduplicate": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "compute_trends": {"server": "data-aggregate", "test_sizes": ["default"]},
+
+    # ===== log-parser (5 tools) =====
+    "parse_logs": {"server": "log-parser", "test_sizes": ["100lines"]},
+    "filter_entries": {"server": "log-parser", "test_sizes": ["100lines"]},
+    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["100lines"]},
+    "search_entries": {"server": "log-parser", "test_sizes": ["100lines"]},
+    "extract_time_range": {"server": "log-parser", "test_sizes": ["100lines"]},
+
+    # ===== summarize (3 tools) =====
+    "summarize_text": {"server": "summarize", "test_sizes": ["default"]},
+    "summarize_documents": {"server": "summarize", "test_sizes": ["default"]},
+    "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
+
+    # ===== time (2 tools) =====
+    "get_current_time": {"server": "time", "test_sizes": ["default"]},
+    "convert_time": {"server": "time", "test_sizes": ["default"]},
+
+    # ===== fetch (1 tool) =====
+    "fetch": {"server": "fetch", "test_sizes": ["default"]},
 }
 
 
@@ -572,7 +611,9 @@ async def run_tool_measurement(
     # Prepare test payload
     input_size = 0
     output_size = 0
+    payload = None
 
+    # ===== filesystem tools =====
     if tool_name in ["read_file", "read_text_file"]:
         test_file = get_test_file_path(input_size_label)
         if not test_file.exists():
@@ -581,6 +622,21 @@ async def run_tool_measurement(
         payload = {"path": str(test_file)}
         input_size = get_file_size(test_file)
 
+    elif tool_name == "read_media_file":
+        img_path = TEST_DATA_DIR / "images" / "test.png"
+        if not img_path.exists():
+            img_path = Path("/tmp/test.png")
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            # Create minimal PNG
+            img_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        payload = {"path": str(img_path)}
+
+    elif tool_name == "read_multiple_files":
+        test_file = get_test_file_path("1KB") if get_test_file_path("1KB").exists() else Path("/tmp/test_multi.txt")
+        if not test_file.exists():
+            test_file.write_text("test content")
+        payload = {"paths": [str(test_file)]}
+
     elif tool_name == "write_file":
         size_bytes = parse_size_label(input_size_label)
         content = "x" * size_bytes
@@ -588,12 +644,30 @@ async def run_tool_measurement(
         payload = {"path": output_path, "content": content}
         input_size = size_bytes
 
-    elif tool_name in ["list_directory"]:
+    elif tool_name == "edit_file":
+        test_file = Path("/tmp/wasm_profiler_edit.txt")
+        test_file.write_text("hello world\nline two\nline three")
+        payload = {"path": str(test_file), "edits": [{"old_text": "hello", "new_text": "hi"}], "dry_run": True}
+
+    elif tool_name == "create_directory":
+        payload = {"path": "/tmp/wasm_profiler_test_dir"}
+
+    elif tool_name in ["list_directory", "list_directory_with_sizes"]:
         test_dir = get_test_directory_path(input_size_label)
         if not test_dir.exists():
-            print(f"Test directory not found: {test_dir}", file=sys.stderr)
-            return None
+            test_dir = Path("/tmp")
         payload = {"path": str(test_dir)}
+
+    elif tool_name == "directory_tree":
+        payload = {"path": "/tmp", "max_depth": 2}
+
+    elif tool_name == "move_file":
+        src = Path("/tmp/wasm_profiler_move_src.txt")
+        src.write_text("test")
+        payload = {"source": str(src), "destination": "/tmp/wasm_profiler_move_dst.txt"}
+
+    elif tool_name == "search_files":
+        payload = {"path": "/tmp", "pattern": "*.txt"}
 
     elif tool_name == "get_file_info":
         test_file = get_test_file_path("1KB")
@@ -602,12 +676,99 @@ async def run_tool_measurement(
             test_file.write_text("test content")
         payload = {"path": str(test_file)}
 
+    elif tool_name == "list_allowed_directories":
+        payload = {}
+
+    # ===== git tools =====
+    elif tool_name == "git_status":
+        payload = {"repo_path": "/tmp"}
+    elif tool_name == "git_log":
+        payload = {"repo_path": "/tmp", "max_count": 5}
+    elif tool_name == "git_show":
+        payload = {"repo_path": "/tmp", "revision": "HEAD"}
+    elif tool_name == "git_branch":
+        payload = {"repo_path": "/tmp"}
+    elif tool_name in ["git_diff_unstaged", "git_diff_staged", "git_reset"]:
+        payload = {"repo_path": "/tmp"}
+    elif tool_name == "git_diff":
+        payload = {"repo_path": "/tmp", "start_commit": "HEAD~1", "end_commit": "HEAD"}
+    elif tool_name == "git_commit":
+        payload = {"repo_path": "/tmp", "message": "test"}
+    elif tool_name == "git_add":
+        payload = {"repo_path": "/tmp", "files": ["."]}
+    elif tool_name == "git_create_branch":
+        payload = {"repo_path": "/tmp", "branch_name": "test-branch"}
+    elif tool_name == "git_checkout":
+        payload = {"repo_path": "/tmp", "branch_name": "main"}
+
+    # ===== image-resize tools =====
+    elif tool_name in ["get_image_info", "compute_image_hash"]:
+        img_path = TEST_DATA_DIR / "images" / "test.png"
+        if not img_path.exists():
+            img_path = Path("/tmp/test.png")
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            img_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        payload = {"path": str(img_path)}
+    elif tool_name == "resize_image":
+        img_path = TEST_DATA_DIR / "images" / "test.png"
+        if not img_path.exists():
+            img_path = Path("/tmp/test.png")
+        payload = {"input_path": str(img_path), "output_path": "/tmp/resized.png", "width": 100, "height": 100}
+    elif tool_name == "scan_directory":
+        payload = {"path": "/tmp"}
+    elif tool_name == "compare_hashes":
+        payload = {"hash1": "abc123", "hash2": "abc123"}
+    elif tool_name == "batch_resize":
+        payload = {"input_dir": "/tmp", "output_dir": "/tmp/resized", "width": 100, "height": 100}
+
+    # ===== data-aggregate tools =====
+    elif tool_name == "aggregate_list":
+        payload = {"items": [{"level": "INFO", "value": 10}, {"level": "ERROR", "value": 20}], "group_by": "level"}
+    elif tool_name == "merge_summaries":
+        payload = {"summaries": [{"count": 10}, {"count": 20}]}
+    elif tool_name == "combine_research_results":
+        payload = {"results": [{"title": "A", "summary": "B"}]}
+    elif tool_name == "deduplicate":
+        payload = {"items": [{"id": 1}, {"id": 1}, {"id": 2}], "key_fields": ["id"]}
+    elif tool_name == "compute_trends":
+        payload = {"time_series": [{"timestamp": "2025-01-01", "value": 10}, {"timestamp": "2025-01-02", "value": 20}]}
+
+    # ===== log-parser tools =====
     elif tool_name == "parse_logs":
-        # Generate log content based on size
         num_lines = int(input_size_label.replace("lines", ""))
         log_content = generate_test_log_content(num_lines)
         payload = {"log_content": log_content, "format_type": "auto"}
         input_size = len(log_content)
+    elif tool_name in ["filter_entries", "compute_log_statistics", "search_entries", "extract_time_range"]:
+        num_lines = int(input_size_label.replace("lines", ""))
+        log_content = generate_test_log_content(num_lines)
+        entries = [{"timestamp": f"2025-01-01T10:{i:02d}:00", "level": "INFO", "message": f"msg{i}"} for i in range(num_lines)]
+        if tool_name == "filter_entries":
+            payload = {"entries": entries, "level": "INFO"}
+        elif tool_name == "compute_log_statistics":
+            payload = {"entries": entries}
+        elif tool_name == "search_entries":
+            payload = {"entries": entries, "pattern": "msg"}
+        elif tool_name == "extract_time_range":
+            payload = {"entries": entries, "start_time": "2025-01-01T10:00:00", "end_time": "2025-01-01T10:30:00"}
+
+    # ===== summarize tools =====
+    elif tool_name == "summarize_text":
+        payload = {"text": "This is a test document. " * 50, "max_length": 100}
+    elif tool_name == "summarize_documents":
+        payload = {"documents": [{"content": "Doc content " * 20}], "max_length": 100}
+    elif tool_name == "get_provider_info":
+        payload = {}
+
+    # ===== time tools =====
+    elif tool_name == "get_current_time":
+        payload = {"timezone": "UTC"}
+    elif tool_name == "convert_time":
+        payload = {"source_timezone": "UTC", "time": "12:00", "target_timezone": "Asia/Seoul"}
+
+    # ===== fetch tools =====
+    elif tool_name == "fetch":
+        payload = {"url": "https://httpbin.org/get"}
 
     else:
         print(f"Tool {tool_name} not yet configured", file=sys.stderr)
