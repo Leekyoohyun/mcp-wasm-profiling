@@ -510,17 +510,19 @@ def process_results(
     timing = {
         "total_ms": statistics.mean(total_times),
         "cold_start_ms": 0.0,
+        "deserialize_ms": 0.0,  # 입력 역직렬화 시간
         "io_ms": 0.0,
-        "serialize_ms": 0.0,
         "compute_ms": 0.0,
+        "serialize_ms": 0.0,
     }
 
     timing_std = {
         "total_ms": statistics.stdev(total_times) if len(total_times) > 1 else 0.0,
         "cold_start_ms": 0.0,
+        "deserialize_ms": 0.0,
         "io_ms": 0.0,
-        "serialize_ms": 0.0,
         "compute_ms": 0.0,
+        "serialize_ms": 0.0,
     }
 
     # Process internal timings if available
@@ -533,20 +535,43 @@ def process_results(
     internal_timings_avg = None
     if raw_internal_timings:
         internal_timings_avg = {}
-        for key in ["io_ms", "serialize_ms", "compute_ms"]:
+
+        # fn_total_ms, io_ms, compute_ms, serialize_ms 파싱
+        for key in ["fn_total_ms", "io_ms", "compute_ms", "serialize_ms"]:
             values = [t.get(key, 0) for t in raw_internal_timings]
             if any(v > 0 for v in values):
-                timing[key] = statistics.mean(values)
-                timing_std[key] = statistics.stdev(values) if len(values) > 1 else 0.0
-                internal_timings_avg[key] = timing[key]
+                avg_val = statistics.mean(values)
+                std_val = statistics.stdev(values) if len(values) > 1 else 0.0
+                if key == "fn_total_ms":
+                    internal_timings_avg["fn_total_ms"] = avg_val
+                else:
+                    timing[key] = avg_val
+                    timing_std[key] = std_val
+                    internal_timings_avg[key] = avg_val
             else:
-                internal_timings_avg[key] = 0.0
+                if key != "fn_total_ms":
+                    internal_timings_avg[key] = 0.0
 
-        # profiling: cold_start = total - io - compute - serialize (overhead 계산)
-        timing["cold_start_ms"] = timing["total_ms"] - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
-        if timing["cold_start_ms"] < 0:
-            timing["cold_start_ms"] = 0.0
+        # 새로운 계산 방식:
+        # cold_start = total - fn_total (진짜 콜드스타트: WASM 로드 + 런타임 초기화)
+        # deserialize = fn_total - io - compute - serialize (입력 역직렬화 시간)
+        fn_total_ms = internal_timings_avg.get("fn_total_ms", 0.0)
+        if fn_total_ms > 0:
+            timing["cold_start_ms"] = timing["total_ms"] - fn_total_ms
+            if timing["cold_start_ms"] < 0:
+                timing["cold_start_ms"] = 0.0
+
+            timing["deserialize_ms"] = fn_total_ms - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
+            if timing["deserialize_ms"] < 0:
+                timing["deserialize_ms"] = 0.0
+        else:
+            # fn_total_ms가 없는 경우 (이전 방식 호환)
+            timing["cold_start_ms"] = timing["total_ms"] - timing["io_ms"] - timing["compute_ms"] - timing["serialize_ms"]
+            if timing["cold_start_ms"] < 0:
+                timing["cold_start_ms"] = 0.0
+
         internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
+        internal_timings_avg["deserialize_ms"] = timing["deserialize_ms"]
 
     # profiling: 각 컴포넌트의 비율 (%) 계산
     total = timing["total_ms"]
@@ -554,12 +579,13 @@ def process_results(
     if total > 0:
         timing_pct = {
             "cold_start_pct": round(timing["cold_start_ms"] / total * 100, 2),
+            "deserialize_pct": round(timing["deserialize_ms"] / total * 100, 2),
             "io_pct": round(timing["io_ms"] / total * 100, 2),
-            "serialize_pct": round(timing["serialize_ms"] / total * 100, 2),
             "compute_pct": round(timing["compute_ms"] / total * 100, 2),
+            "serialize_pct": round(timing["serialize_ms"] / total * 100, 2),
         }
     else:
-        timing_pct = {"cold_start_pct": 0, "io_pct": 0, "serialize_pct": 0, "compute_pct": 0}
+        timing_pct = {"cold_start_pct": 0, "deserialize_pct": 0, "io_pct": 0, "compute_pct": 0, "serialize_pct": 0}
 
     return ToolMeasurement(
         tool_name=tool_name,
@@ -868,9 +894,10 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
             "timing_ms": {
                 "total": round(m.timing["total_ms"], 3),
                 "cold_start": round(m.timing["cold_start_ms"], 3),
+                "deserialize": round(m.timing.get("deserialize_ms", 0.0), 3),
                 "io": round(m.timing["io_ms"], 3),
-                "serialize": round(m.timing["serialize_ms"], 3),
                 "compute": round(m.timing["compute_ms"], 3),
+                "serialize": round(m.timing["serialize_ms"], 3),
             },
             "timing_pct": m.timing_pct,
         }
