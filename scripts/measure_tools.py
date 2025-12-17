@@ -134,10 +134,11 @@ class ToolMeasurement:
     # Timing statistics (ms)
     timing: Dict[str, float]
     timing_std: Dict[str, float]
+    timing_pct: Dict[str, float]  # 각 컴포넌트의 비율 (%)
     measurements: List[float]
 
-    # Internal timing if available
-    internal_timings: Optional[List[Dict[str, float]]] = None
+    # Internal timing if available (averaged)
+    internal_timings: Optional[Dict[str, float]] = None
 
 
 # =============================================================================
@@ -508,6 +509,19 @@ def process_results(
             timing["cold_start_ms"] = 0.0
         internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
 
+    # profiling: 각 컴포넌트의 비율 (%) 계산
+    total = timing["total_ms"]
+    timing_pct = {}
+    if total > 0:
+        timing_pct = {
+            "cold_start_pct": round(timing["cold_start_ms"] / total * 100, 2),
+            "io_pct": round(timing["io_ms"] / total * 100, 2),
+            "serialize_pct": round(timing["serialize_ms"] / total * 100, 2),
+            "compute_pct": round(timing["compute_ms"] / total * 100, 2),
+        }
+    else:
+        timing_pct = {"cold_start_pct": 0, "io_pct": 0, "serialize_pct": 0, "compute_pct": 0}
+
     return ToolMeasurement(
         tool_name=tool_name,
         node=get_node_name(),
@@ -519,6 +533,7 @@ def process_results(
         timestamp=datetime.now().isoformat(),
         timing=timing,
         timing_std=timing_std,
+        timing_pct=timing_pct,
         measurements=total_times,
         internal_timings=internal_timings_avg
     )
@@ -642,6 +657,41 @@ def save_results(measurements: List[ToolMeasurement], output_file: Path):
     print(f"\nResults saved to: {output_file}")
 
 
+def save_summary(measurements: List[ToolMeasurement], output_file: Path):
+    """Save summary of all measurements to a single JSON file"""
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    summary = {
+        "node": measurements[0].node if measurements else "unknown",
+        "timestamp": datetime.now().isoformat(),
+        "total_measurements": len(measurements),
+        "tools": {}
+    }
+
+    for m in measurements:
+        key = f"{m.tool_name}_{m.input_size_label}_{m.mode}"
+        summary["tools"][key] = {
+            "tool_name": m.tool_name,
+            "mode": m.mode,
+            "input_size": m.input_size,
+            "input_size_label": m.input_size_label,
+            "runs": m.runs,
+            "timing_ms": {
+                "total": round(m.timing["total_ms"], 3),
+                "cold_start": round(m.timing["cold_start_ms"], 3),
+                "io": round(m.timing["io_ms"], 3),
+                "serialize": round(m.timing["serialize_ms"], 3),
+                "compute": round(m.timing["compute_ms"], 3),
+            },
+            "timing_pct": m.timing_pct,
+        }
+
+    with open(output_file, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"Summary saved to: {output_file}")
+
+
 # =============================================================================
 # CLI Interface
 # =============================================================================
@@ -737,13 +787,19 @@ Examples:
 
     # Save results
     if all_measurements:
+        node_name = get_node_name()
+        timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+
         if args.output:
             output_file = args.output
         else:
-            node_name = get_node_name()
-            output_file = RESULTS_DIR / node_name / f"measurements_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            output_file = RESULTS_DIR / node_name / f"measurements_{timestamp_str}.json"
 
         save_results(all_measurements, output_file)
+
+        # Save summary file
+        summary_file = RESULTS_DIR / node_name / f"summary_{timestamp_str}.json"
+        save_summary(all_measurements, summary_file)
     else:
         print("\nNo measurements collected", file=sys.stderr)
 
