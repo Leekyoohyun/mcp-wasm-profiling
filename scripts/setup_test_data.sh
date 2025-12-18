@@ -226,6 +226,79 @@ for subdir in src docs data config; do
 done
 
 # =============================================================================
+# Create Test Git Repository
+# =============================================================================
+
+echo ""
+echo "=== Creating Test Git Repository ==="
+
+GIT_REPO_DIR="${TEST_DATA_DIR}/git_repo"
+
+# 기존 git repo 삭제 후 새로 생성
+rm -rf "${GIT_REPO_DIR}"
+mkdir -p "${GIT_REPO_DIR}"
+cd "${GIT_REPO_DIR}"
+
+# git 초기화
+git init
+
+# 테스트용 user 설정 (repo 로컬)
+git config user.email "test@test.com"
+git config user.name "Test User"
+
+# 초기 파일 생성 및 커밋
+echo "line 1" > test.txt
+echo "# Test Repository" > README.md
+git add test.txt README.md
+git commit -m "Initial commit"
+
+# 두 번째 커밋
+echo "line 2" >> test.txt
+echo "More content" >> README.md
+git add test.txt README.md
+git commit -m "Second commit"
+
+# 세 번째 커밋
+echo "line 3" >> test.txt
+echo "function hello() { return 'world'; }" > code.js
+git add test.txt code.js
+git commit -m "Third commit: add code.js"
+
+# 네 번째 커밋
+echo "line 4" >> test.txt
+echo "def main(): pass" > main.py
+git add test.txt main.py
+git commit -m "Fourth commit: add main.py"
+
+# 다섯 번째 커밋
+echo "line 5" >> test.txt
+git add test.txt
+git commit -m "Fifth commit"
+
+# 브랜치 생성
+git branch feature-branch
+git branch bugfix-branch
+
+# unstaged 변경사항 (git_diff_unstaged 테스트용)
+echo "line 6 - unstaged change" >> test.txt
+
+# staged 변경사항 (git_diff_staged 테스트용)
+echo "staged content" > staged.txt
+git add staged.txt
+
+# untracked 파일 (git_status 테스트용)
+echo "untracked file content" > untracked.txt
+
+cd "${PROJECT_DIR}"
+
+echo "Git repository created at: ${GIT_REPO_DIR}"
+echo "  - 5 commits"
+echo "  - 2 branches (feature-branch, bugfix-branch)"
+echo "  - 1 unstaged change"
+echo "  - 1 staged change"
+echo "  - 1 untracked file"
+
+# =============================================================================
 # Summary
 # =============================================================================
 

@@ -711,26 +711,28 @@ async def run_tool_measurement(
         payload = {}
 
     # ===== git tools =====
-    elif tool_name == "git_status":
-        payload = {"repo_path": "/tmp"}
+    # test_data/git_repo 사용 (setup_test_data.sh로 생성)
+    git_repo = str(TEST_DATA_DIR / "git_repo")
+    if tool_name == "git_status":
+        payload = {"repo_path": git_repo}
     elif tool_name == "git_log":
-        payload = {"repo_path": "/tmp", "max_count": 5}
+        payload = {"repo_path": git_repo, "max_count": 5}
     elif tool_name == "git_show":
-        payload = {"repo_path": "/tmp", "revision": "HEAD"}
+        payload = {"repo_path": git_repo, "revision": "HEAD"}
     elif tool_name == "git_branch":
-        payload = {"repo_path": "/tmp", "branch_type": "local"}
+        payload = {"repo_path": git_repo, "branch_type": "local"}
     elif tool_name in ["git_diff_unstaged", "git_diff_staged", "git_reset"]:
-        payload = {"repo_path": "/tmp"}
+        payload = {"repo_path": git_repo}
     elif tool_name == "git_diff":
-        payload = {"repo_path": "/tmp", "target": "HEAD"}
+        payload = {"repo_path": git_repo, "target": "HEAD~1"}
     elif tool_name == "git_commit":
-        payload = {"repo_path": "/tmp", "message": "test"}
+        payload = {"repo_path": git_repo, "message": "test commit"}
     elif tool_name == "git_add":
-        payload = {"repo_path": "/tmp", "files": ["."]}
+        payload = {"repo_path": git_repo, "files": ["untracked.txt"]}
     elif tool_name == "git_create_branch":
-        payload = {"repo_path": "/tmp", "branch_name": "test-branch"}
+        payload = {"repo_path": git_repo, "branch_name": "test-branch-new"}
     elif tool_name == "git_checkout":
-        payload = {"repo_path": "/tmp", "branch_name": "main"}
+        payload = {"repo_path": git_repo, "branch_name": "master"}
 
     # ===== image-resize tools =====
     elif tool_name in ["get_image_info", "compute_image_hash", "resize_image"]:
