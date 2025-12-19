@@ -73,9 +73,7 @@ SERVER_WASM_MAP = {
     'image-resize': 'mcp_server_image_resize.wasm',
     'data-aggregate': 'mcp_server_data_aggregate.wasm',
     'log-parser': 'mcp_server_log_parser.wasm',
-    'summarize': 'mcp_server_summarize.wasm',
     'time': 'mcp_server_time.wasm',
-    'fetch': 'mcp_server_fetch.wasm',
     'sequential-thinking': 'mcp_server_sequential_thinking.wasm',
 }
 
@@ -133,17 +131,9 @@ TOOL_CONFIGS = {
     "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
     "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"]},
 
-    # ===== summarize (3 tools) =====
-    "summarize_text": {"server": "summarize", "test_sizes": ["default"]},
-    "summarize_documents": {"server": "summarize", "test_sizes": ["default"]},
-    "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
-
     # ===== time (2 tools) =====
     "get_current_time": {"server": "time", "test_sizes": ["default"]},
     "convert_time": {"server": "time", "test_sizes": ["default"]},
-
-    # ===== fetch (1 tool) =====
-    "fetch": {"server": "fetch", "test_sizes": ["default"]},
 
     # ===== sequential-thinking (1 tool) =====
     "sequentialthinking": {"server": "sequential-thinking", "test_sizes": ["default"]},
@@ -877,23 +867,11 @@ async def run_tool_measurement(
         elif tool_name == "extract_time_range":
             payload = {"entries": entries}
 
-    # ===== summarize tools =====
-    if tool_name == "summarize_text":
-        payload = {"text": "This is a test document. " * 50, "max_length": 100}
-    elif tool_name == "summarize_documents":
-        payload = {"documents": ["Doc content " * 20], "max_length_per_doc": 100}
-    elif tool_name == "get_provider_info":
-        payload = {}
-
     # ===== time tools =====
     if tool_name == "get_current_time":
         payload = {"timezone": "UTC"}
     elif tool_name == "convert_time":
         payload = {"source_timezone": "UTC", "time": "12:00", "target_timezone": "Asia/Seoul"}
-
-    # ===== fetch tools =====
-    if tool_name == "fetch":
-        payload = {"url": "https://httpbin.org/get"}
 
     # ===== sequential-thinking tools =====
     if tool_name == "sequentialthinking":
