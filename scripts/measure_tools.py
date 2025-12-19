@@ -325,15 +325,27 @@ def measure_cold_start(
     for d in allowed_dirs:
         dir_args.extend(["--dir", d])
 
+    # Load environment variables (including from ~/.env if exists)
+    env = os.environ.copy()
+    env_file = Path.home() / ".env"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    env[key] = value
+
     start_time = time.perf_counter()
 
     try:
         result = subprocess.run(
-            ["wasmtime", "run"] + dir_args + [str(wasm_path)],
+            ["wasmtime", "run"] + dir_args + ["--env", "OPENAI_API_KEY"] + [str(wasm_path)],
             input=json_input,
             capture_output=True,
             text=True,
-            timeout=60.0
+            timeout=60.0,
+            env=env
         )
 
         end_time = time.perf_counter()
