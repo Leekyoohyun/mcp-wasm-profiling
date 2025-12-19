@@ -92,18 +92,13 @@ class TimingResult:
 
 @dataclass
 class ToolMeasurement:
-    """Complete measurement for a tool"""
+    """Complete measurement for a tool - matching stdio format"""
     tool_name: str
-    node: str
+    input_size: int
+    input_size_label: str
     runs: int
-    timestamp: str
-    transport: str  # "http"
-
-    # Timing statistics (ms) - matching stdio format
-    timing: Dict[str, float]
-    timing_std: Dict[str, float]
-
-    measurements: List[float]
+    timing_ms: Dict[str, float]
+    timing_pct: Dict[str, float]
 
 
 # =============================================================================
@@ -325,6 +320,7 @@ def measure_http_cold_start_multiple(
 
 def process_results(
     tool_name: str,
+    input_size: int,
     results: List[TimingResult]
 ) -> Optional[ToolMeasurement]:
     """Process timing results into a ToolMeasurement"""
@@ -336,36 +332,37 @@ def process_results(
         return None
 
     # Calculate statistics
-    total_times = [r.total_ms for r in valid_results]
     startup_times = [r.server_startup_ms for r in valid_results]
     request_times = [r.request_ms for r in valid_results]
 
-    # Build timing dict matching stdio format
+    # Build timing_ms dict matching stdio format
     # HTTP mode: cold_start = server_startup, tool_exec = request_ms
-    # (cannot decompose io/compute in HTTP mode)
-    timing = {
-        "cold_start_ms": statistics.mean(startup_times),
-        "tool_exec_ms": statistics.mean(request_times),
-        "io_ms": 0.0,  # Cannot measure in HTTP mode
-        "compute_ms": statistics.mean(request_times),  # Assume all compute
+    # json_parse = 0 (cannot measure in HTTP mode)
+    # io = request_ms (network I/O), compute = 0
+    cold_start = round(statistics.mean(startup_times), 3)
+    tool_exec = round(statistics.mean(request_times), 3)
+
+    timing_ms = {
+        "cold_start": cold_start,
+        "json_parse": 0.0,  # Cannot measure in HTTP mode
+        "tool_exec": tool_exec,
+        "io": tool_exec,  # HTTP request is I/O
+        "compute": 0.0,
     }
 
-    timing_std = {
-        "cold_start_ms": statistics.stdev(startup_times) if len(startup_times) > 1 else 0.0,
-        "tool_exec_ms": statistics.stdev(request_times) if len(request_times) > 1 else 0.0,
-        "io_ms": 0.0,
-        "compute_ms": statistics.stdev(request_times) if len(request_times) > 1 else 0.0,
+    # timing_pct: io/compute percentage of tool_exec
+    timing_pct = {
+        "io_pct": 100.0,  # HTTP mode: all I/O
+        "compute_pct": 0.0,
     }
 
     return ToolMeasurement(
         tool_name=tool_name,
-        node=get_node_name(),
+        input_size=input_size,
+        input_size_label="default",
         runs=len(valid_results),
-        timestamp=datetime.now().isoformat(),
-        transport="http",
-        timing=timing,
-        timing_std=timing_std,
-        measurements=total_times
+        timing_ms=timing_ms,
+        timing_pct=timing_pct
     )
 
 
@@ -408,21 +405,31 @@ def run_tool_measurement(
     )
 
     # Process results
-    measurement = process_results(tool_name, results)
+    measurement = process_results(tool_name, input_size, results)
 
     if measurement:
-        t = measurement.timing
-        print(f"    cold_start: {t['cold_start_ms']:.2f}ms")
-        print(f"    tool_exec:  {t['tool_exec_ms']:.2f}ms (HTTP request)")
+        t = measurement.timing_ms
+        print(f"    cold_start: {t['cold_start']:.2f}ms")
+        print(f"    tool_exec:  {t['tool_exec']:.2f}ms (HTTP I/O)")
 
     return measurement
 
 
 def save_results(measurements: List[ToolMeasurement], output_file: Path):
-    """Save measurements to JSON file"""
+    """Save measurements to JSON file - matching stdio summary format"""
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    data = [asdict(m) for m in measurements]
+    # Format as dict with tool_name as key (like stdio summary)
+    data = {
+        "node": get_node_name(),
+        "timestamp": datetime.now().isoformat(),
+        "transport": "http",
+        "total_measurements": len(measurements),
+        "tools": {}
+    }
+
+    for m in measurements:
+        data["tools"][m.tool_name] = asdict(m)
 
     with open(output_file, "w") as f:
         json.dump(data, f, indent=2)
@@ -508,11 +515,11 @@ Examples:
         print("\n" + "=" * 60)
         print("Summary (HTTP Cold Start)")
         print("=" * 60)
-        print(f"{'Tool':<25} {'cold_start':<15} {'tool_exec':<15}")
-        print("-" * 55)
+        print(f"{'Tool':<25} {'cold_start':<15} {'tool_exec':<15} {'io':<15}")
+        print("-" * 70)
         for m in all_measurements:
-            t = m.timing
-            print(f"{m.tool_name:<25} {t['cold_start_ms']:<15.2f} {t['tool_exec_ms']:<15.2f}")
+            t = m.timing_ms
+            print(f"{m.tool_name:<25} {t['cold_start']:<15.2f} {t['tool_exec']:<15.2f} {t['io']:<15.2f}")
     else:
         print("\nNo measurements collected", file=sys.stderr)
 
