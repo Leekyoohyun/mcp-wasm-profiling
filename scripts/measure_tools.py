@@ -790,7 +790,7 @@ async def run_tool_measurement(
         payload = {"repo_path": git_repo, "branch_name": "master"}
 
     # ===== image-resize tools =====
-    elif tool_name in ["get_image_info", "compute_image_hash", "resize_image"]:
+    if tool_name in ["get_image_info", "compute_image_hash", "resize_image"]:
         img_path = TEST_DATA_DIR / "images" / "test.png"
         if not img_path.exists():
             print(f"Test image not found: {img_path}", file=sys.stderr)
@@ -821,7 +821,7 @@ async def run_tool_measurement(
         payload = {"image_paths": [str(img_path)], "max_size": 100}
 
     # ===== data-aggregate tools (100,000개 아이템 → ~5MB) =====
-    elif tool_name == "aggregate_list":
+    if tool_name == "aggregate_list":
         # 100,000 items → ~5MB input (이전 테스트: 54MB)
         items = [{"level": ["INFO", "WARN", "ERROR"][i % 3], "value": i * 10} for i in range(100000)]
         payload = {"items": items, "group_by": "level"}
@@ -843,7 +843,7 @@ async def run_tool_measurement(
         payload = {"time_series": time_series}
 
     # ===== log-parser tools =====
-    elif tool_name == "parse_logs":
+    if tool_name == "parse_logs":
         num_lines = int(input_size_label.replace("lines", ""))
         log_content = generate_test_log_content(num_lines)
         payload = {"log_content": log_content, "format_type": "auto"}
@@ -862,7 +862,7 @@ async def run_tool_measurement(
             payload = {"entries": entries}
 
     # ===== summarize tools =====
-    elif tool_name == "summarize_text":
+    if tool_name == "summarize_text":
         payload = {"text": "This is a test document. " * 50, "max_length": 100}
     elif tool_name == "summarize_documents":
         payload = {"documents": ["Doc content " * 20], "max_length_per_doc": 100}
@@ -870,16 +870,17 @@ async def run_tool_measurement(
         payload = {}
 
     # ===== time tools =====
-    elif tool_name == "get_current_time":
+    if tool_name == "get_current_time":
         payload = {"timezone": "UTC"}
     elif tool_name == "convert_time":
         payload = {"source_timezone": "UTC", "time": "12:00", "target_timezone": "Asia/Seoul"}
 
     # ===== fetch tools =====
-    elif tool_name == "fetch":
+    if tool_name == "fetch":
         payload = {"url": "https://httpbin.org/get"}
 
-    else:
+    # payload가 설정되지 않은 경우
+    if payload is None:
         print(f"Tool {tool_name} not yet configured", file=sys.stderr)
         return None
 
