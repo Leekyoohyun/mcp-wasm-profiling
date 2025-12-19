@@ -196,7 +196,7 @@ def compare_cold_warm(results: List[Dict]) -> Dict[str, Dict]:
 
 
 def analyze_time_decomposition(results: List[Dict]) -> Dict[str, Dict]:
-    """Analyze time decomposition (cold_start, deser, tool_exec, io, compute)"""
+    """Analyze time decomposition (startup, json_parse, tool_exec, disk_io, network_io, compute)"""
     decomposition = {}
 
     for r in results:
@@ -209,23 +209,25 @@ def analyze_time_decomposition(results: List[Dict]) -> Dict[str, Dict]:
         if timing:
             # _ms 접미사 있는 키와 없는 키 모두 지원
             total = timing.get("total") or timing.get("total_ms", 0)
-            cold_start = timing.get("cold_start") or timing.get("cold_start_ms", 0)
-            deser = timing.get("deser") or timing.get("deser_ms", 0)
+            startup = timing.get("startup") or timing.get("startup_ms", 0)
+            json_parse = timing.get("json_parse") or timing.get("json_parse_ms", 0)
             tool_exec = timing.get("tool_exec") or timing.get("tool_exec_ms", 0)
-            io_ms = timing.get("io") or timing.get("io_ms", 0)
+            disk_io = timing.get("disk_io") or timing.get("disk_io_ms", 0)
+            network_io = timing.get("network_io") or timing.get("network_io_ms", 0)
             compute = timing.get("compute") or timing.get("compute_ms", 0)
 
             if total > 0:
                 decomposition[key] = {
                     "total_ms": total,
-                    "cold_start_ms": cold_start,
-                    "deser_ms": deser,
+                    "startup_ms": startup,
+                    "json_parse_ms": json_parse,
                     "tool_exec_ms": tool_exec,
-                    "io_ms": io_ms,
+                    "disk_io_ms": disk_io,
+                    "network_io_ms": network_io,
                     "compute_ms": compute,
                     # Percentages relative to tool_exec only
-                    # (cold_start, deser are measured separately)
-                    "io_pct": (io_ms / tool_exec) * 100 if tool_exec > 0 else 0,
+                    "disk_io_pct": (disk_io / tool_exec) * 100 if tool_exec > 0 else 0,
+                    "network_io_pct": (network_io / tool_exec) * 100 if tool_exec > 0 else 0,
                     "compute_pct": (compute / tool_exec) * 100 if tool_exec > 0 else 0,
                 }
 
@@ -318,26 +320,27 @@ def print_comparison_table(comparison: Dict[str, Dict]):
 
 def print_decomposition_table(decomposition: Dict[str, Dict]):
     """Print time decomposition table"""
-    print(f"\n{'='*110}")
+    print(f"\n{'='*130}")
     print("Execution Time Decomposition")
-    print("  cold_start -> deser -> tool_exec (io + compute)")
-    print("  Percentages are relative to tool_exec only")
-    print(f"{'='*110}")
+    print("  total = startup + json_parse + tool_exec")
+    print("  tool_exec = disk_io + network_io + compute")
+    print(f"{'='*130}")
 
     if not decomposition:
         print("No decomposition data available (internal timing not captured)")
         return
 
-    print(f"{'Tool:Size':<25} {'Total':>8} {'ColdStart':>10} {'Deser':>10} {'ToolExec':>10} {'I/O':>12} {'Compute':>12}")
-    print(f"{'':<25} {'(ms)':>8} {'(ms)':>10} {'(ms)':>10} {'(ms)':>10} {'(ms/%)':>12} {'(ms/%)':>12}")
-    print("-" * 110)
+    print(f"{'Tool:Size':<28} {'Total':>8} {'Startup':>9} {'JSONParse':>10} {'ToolExec':>9} {'DiskIO':>12} {'NetIO':>12} {'Compute':>12}")
+    print(f"{'':<28} {'(ms)':>8} {'(ms)':>9} {'(ms)':>10} {'(ms)':>9} {'(ms/%)':>12} {'(ms/%)':>12} {'(ms/%)':>12}")
+    print("-" * 130)
 
     for key, values in sorted(decomposition.items()):
-        print(f"{key:<25} {values['total_ms']:>8.2f} "
-              f"{values['cold_start_ms']:>10.2f} "
-              f"{values['deser_ms']:>10.2f} "
-              f"{values['tool_exec_ms']:>10.2f} "
-              f"{values['io_ms']:>6.1f}/{values['io_pct']:>4.0f}% "
+        print(f"{key:<28} {values['total_ms']:>8.1f} "
+              f"{values['startup_ms']:>9.1f} "
+              f"{values['json_parse_ms']:>10.1f} "
+              f"{values['tool_exec_ms']:>9.1f} "
+              f"{values['disk_io_ms']:>6.1f}/{values['disk_io_pct']:>4.0f}% "
+              f"{values['network_io_ms']:>6.1f}/{values['network_io_pct']:>4.0f}% "
               f"{values['compute_ms']:>6.1f}/{values['compute_pct']:>4.0f}%")
 
 
@@ -446,10 +449,11 @@ def plot_time_decomposition(results: List[Dict], tool_name: str, output_path: Op
 
     # Prepare data
     labels = []
-    cold_start = []
-    deser_time = []
-    io_time = []
-    compute_time = []
+    startup_times = []
+    json_parse_times = []
+    disk_io_times = []
+    network_io_times = []
+    compute_times = []
 
     for r in filtered:
         label = f"{r.get('node', '')}:{r.get('input_size_label', '')}"
@@ -459,33 +463,37 @@ def plot_time_decomposition(results: List[Dict], tool_name: str, output_path: Op
         timing = r.get("timing_ms") or r.get("timing", {})
         total = timing.get("total") or timing.get("total_ms", 1)  # Avoid division by zero
 
-        # Get component times (decomposition: cold_start + deser + io + compute)
-        # _ms 접미사 있는 키와 없는 키 모두 지원
-        cs = timing.get("cold_start") or timing.get("cold_start_ms", 0)
-        deser = timing.get("deser") or timing.get("deser_ms", 0)
-        io = timing.get("io") or timing.get("io_ms", 0)
-        comp = timing.get("compute") or timing.get("compute_ms", 0)
+        # Get component times
+        startup = timing.get("startup") or timing.get("startup_ms", 0)
+        json_parse = timing.get("json_parse") or timing.get("json_parse_ms", 0)
+        disk_io = timing.get("disk_io") or timing.get("disk_io_ms", 0)
+        network_io = timing.get("network_io") or timing.get("network_io_ms", 0)
+        compute = timing.get("compute") or timing.get("compute_ms", 0)
 
         # If no internal timing, attribute all to "compute" (unknown)
-        if cs + deser + io + comp == 0:
-            comp = total
+        if startup + json_parse + disk_io + network_io + compute == 0:
+            compute = total
 
-        cold_start.append(cs)
-        deser_time.append(deser)
-        io_time.append(io)
-        compute_time.append(comp)
+        startup_times.append(startup)
+        json_parse_times.append(json_parse)
+        disk_io_times.append(disk_io)
+        network_io_times.append(network_io)
+        compute_times.append(compute)
 
     # Create stacked bar chart
     fig, ax = plt.subplots(figsize=(12, 6))
 
     x = range(len(labels))
-    # Stack: cold_start -> deser -> io -> compute
-    ax.bar(x, cold_start, label='Cold Start (WASM load)', color='#e74c3c')
-    ax.bar(x, deser_time, bottom=cold_start, label='Deserialization', color='#f39c12')
-    bottom_io = [a+b for a,b in zip(cold_start, deser_time)]
-    ax.bar(x, io_time, bottom=bottom_io, label='I/O', color='#3498db')
-    bottom_comp = [a+b for a,b in zip(bottom_io, io_time)]
-    ax.bar(x, compute_time, bottom=bottom_comp, label='Compute', color='#2ecc71')
+    # Stack: startup -> json_parse -> disk_io -> network_io -> compute
+    ax.bar(x, startup_times, label='Startup (WASM load)', color='#e74c3c')
+    bottom1 = startup_times
+    ax.bar(x, json_parse_times, bottom=bottom1, label='JSON Parse', color='#f39c12')
+    bottom2 = [a+b for a,b in zip(bottom1, json_parse_times)]
+    ax.bar(x, disk_io_times, bottom=bottom2, label='Disk I/O', color='#3498db')
+    bottom3 = [a+b for a,b in zip(bottom2, disk_io_times)]
+    ax.bar(x, network_io_times, bottom=bottom3, label='Network I/O', color='#9b59b6')
+    bottom4 = [a+b for a,b in zip(bottom3, network_io_times)]
+    ax.bar(x, compute_times, bottom=bottom4, label='Compute', color='#2ecc71')
 
     ax.set_xlabel("Node:Size")
     ax.set_ylabel("Time (ms)")
