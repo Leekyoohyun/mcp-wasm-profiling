@@ -336,12 +336,18 @@ def measure_cold_start(
         total_ms = (end_time - start_time) * 1000
 
         # profiling: stderr에서 타이밍 마커 파싱
+        json_parse_ms = None
         tool_exec_ms = None
         io_ms = None
         wasm_total_ms = None
         if result.stderr:
             for line in result.stderr.strip().split('\n'):
-                if line.startswith("---TOOL_EXEC---"):
+                if line.startswith("---JSON_PARSE---"):
+                    try:
+                        json_parse_ms = float(line[len("---JSON_PARSE---"):])
+                    except ValueError:
+                        pass
+                elif line.startswith("---TOOL_EXEC---"):
                     try:
                         tool_exec_ms = float(line[len("---TOOL_EXEC---"):])
                     except ValueError:
@@ -359,6 +365,8 @@ def measure_cold_start(
 
         # internal_timing에 파싱된 값들 추가
         internal_timing = {}
+        if json_parse_ms is not None:
+            internal_timing["json_parse_ms"] = json_parse_ms
         if tool_exec_ms is not None:
             internal_timing["tool_exec_ms"] = tool_exec_ms
         if io_ms is not None:
@@ -526,14 +534,14 @@ def process_results(
     total_times = [r.total_ms for r in valid_results]
 
     # 시간 분해 모델:
-    # total = cold_start + tool_exec (외부 subprocess 전체 시간)
-    # cold_start = total - wasm_total (wasmtime 오버헤드)
-    # tool_exec = 도구 실행 시간 (---TOOL_EXEC---)
-    # io = I/O 시간 (---IO---)
-    # compute = tool_exec - io
+    # total = cold_start + wasm_total
+    # cold_start = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
+    # wasm_total = json_parse + tool_exec + 기타
+    # tool_exec = io + compute
     timing = {
         "total_ms": statistics.mean(total_times),
         "cold_start_ms": 0.0,      # total - wasm_total
+        "json_parse_ms": 0.0,      # JSON 파싱 시간
         "tool_exec_ms": 0.0,       # 도구 실행 시간
         "io_ms": 0.0,              # I/O 시간
         "compute_ms": 0.0,         # tool_exec - io
@@ -542,6 +550,7 @@ def process_results(
     timing_std = {
         "total_ms": statistics.stdev(total_times) if len(total_times) > 1 else 0.0,
         "cold_start_ms": 0.0,
+        "json_parse_ms": 0.0,
         "tool_exec_ms": 0.0,
         "io_ms": 0.0,
         "compute_ms": 0.0,
@@ -560,6 +569,15 @@ def process_results(
 
         # wasm_total_ms 파싱 (from ---WASM_TOTAL---)
         wasm_total_values = [t.get("wasm_total_ms", 0) for t in raw_internal_timings]
+
+        # json_parse_ms 파싱 (from ---JSON_PARSE---)
+        json_parse_values = [t.get("json_parse_ms", 0) for t in raw_internal_timings]
+        if any(v > 0 for v in json_parse_values):
+            avg_val = statistics.mean(json_parse_values)
+            std_val = statistics.stdev(json_parse_values) if len(json_parse_values) > 1 else 0.0
+            timing["json_parse_ms"] = avg_val
+            timing_std["json_parse_ms"] = std_val
+            internal_timings_avg["json_parse_ms"] = avg_val
 
         # tool_exec_ms 파싱 (from ---TOOL_EXEC---)
         tool_exec_values = [t.get("tool_exec_ms", 0) for t in raw_internal_timings]
@@ -583,9 +601,8 @@ def process_results(
         timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - timing["io_ms"])
         internal_timings_avg["compute_ms"] = timing["compute_ms"]
 
-        # cold_start_ms = total - wasm_total (wasmtime 오버헤드)
+        # cold_start_ms = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
         if any(v > 0 for v in wasm_total_values):
-            wasm_total_avg = statistics.mean(wasm_total_values)
             # 각 run별로 cold_start 계산해서 std 구하기
             cold_start_per_run = []
             for i, r in enumerate(valid_results):
@@ -594,29 +611,18 @@ def process_results(
             if cold_start_per_run:
                 timing["cold_start_ms"] = statistics.mean(cold_start_per_run)
                 timing_std["cold_start_ms"] = statistics.stdev(cold_start_per_run) if len(cold_start_per_run) > 1 else 0.0
-            else:
-                timing["cold_start_ms"] = timing["total_ms"] - wasm_total_avg
             internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
         else:
-            # wasm_total이 없으면 total - tool_exec로 추정
-            timing["cold_start_ms"] = timing["total_ms"] - timing["tool_exec_ms"]
+            # wasm_total이 없으면 total - (json_parse + tool_exec)로 추정
+            timing["cold_start_ms"] = timing["total_ms"] - timing["json_parse_ms"] - timing["tool_exec_ms"]
             internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
     else:
         # internal timing이 없으면 전체 시간을 cold_start로 간주
         timing["cold_start_ms"] = timing["total_ms"]
 
-    # profiling: 각 컴포넌트의 비율 (%) 계산
-    # total 기준: cold_start + tool_exec = total
-    # tool_exec 기준: io + compute = tool_exec
-    total = timing["total_ms"]
+    # profiling: tool_exec 중 io, compute 비율만 계산
     tool_exec = timing["tool_exec_ms"]
     timing_pct = {}
-    if total > 0:
-        timing_pct["cold_start_pct"] = round(timing["cold_start_ms"] / total * 100, 2)
-        timing_pct["tool_exec_pct"] = round(tool_exec / total * 100, 2)
-    else:
-        timing_pct["cold_start_pct"] = 0
-        timing_pct["tool_exec_pct"] = 0
     if tool_exec > 0:
         timing_pct["io_pct"] = round(timing["io_ms"] / tool_exec * 100, 2)
         timing_pct["compute_pct"] = round(timing["compute_ms"] / tool_exec * 100, 2)
@@ -746,6 +752,22 @@ async def run_tool_measurement(
     # ===== git tools =====
     # test_data/git_repo 사용 (setup_test_data.sh로 생성)
     git_repo = str(TEST_DATA_DIR / "git_repo")
+    git_repo_path = TEST_DATA_DIR / "git_repo"
+
+    # git 테스트 전에 변경사항 생성 (diff가 실제로 발생하도록)
+    if tool_name.startswith("git_"):
+        test_file = git_repo_path / "test_changes.txt"
+        import random
+        # 매번 다른 내용으로 파일 수정 (unstaged 변경사항 생성)
+        test_file.write_text(f"Test content modified at {time.time()}\n" + "x" * 10000)
+
+        # staged 변경사항도 생성
+        staged_file = git_repo_path / "staged_changes.txt"
+        staged_file.write_text(f"Staged content {time.time()}\n" + "y" * 10000)
+        import subprocess
+        subprocess.run(["git", "-C", git_repo, "add", "staged_changes.txt"],
+                      capture_output=True, timeout=5)
+
     if tool_name == "git_status":
         payload = {"repo_path": git_repo}
     elif tool_name == "git_log":
@@ -761,9 +783,9 @@ async def run_tool_measurement(
     elif tool_name == "git_commit":
         payload = {"repo_path": git_repo, "message": "test commit"}
     elif tool_name == "git_add":
-        payload = {"repo_path": git_repo, "files": ["untracked.txt"]}
+        payload = {"repo_path": git_repo, "files": ["test_changes.txt"]}
     elif tool_name == "git_create_branch":
-        payload = {"repo_path": git_repo, "branch_name": "test-branch-new"}
+        payload = {"repo_path": git_repo, "branch_name": f"test-branch-{int(time.time())}"}
     elif tool_name == "git_checkout":
         payload = {"repo_path": git_repo, "branch_name": "master"}
 
@@ -926,8 +948,9 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
     for m in cold_measurements:
         key = m.tool_name
         # 시간 분해 모델:
-        # total = cold_start + tool_exec (외부 subprocess 전체 시간)
-        # cold_start = total - wasm_total (wasmtime 오버헤드)
+        # total = cold_start + wasm_total
+        # cold_start = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
+        # json_parse = JSON 파싱 시간 (---JSON_PARSE---)
         # tool_exec = 도구 실행 시간 (---TOOL_EXEC---)
         # io = I/O 시간 (---IO---)
         # compute = tool_exec - io
@@ -939,6 +962,7 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
             "timing_ms": {
                 "total": round(m.timing["total_ms"], 3),
                 "cold_start": round(m.timing["cold_start_ms"], 3),
+                "json_parse": round(m.timing["json_parse_ms"], 3),
                 "tool_exec": round(m.timing["tool_exec_ms"], 3),
                 "io": round(m.timing["io_ms"], 3),
                 "compute": round(m.timing["compute_ms"], 3),
