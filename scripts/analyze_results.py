@@ -104,6 +104,17 @@ def load_node_results(node_name: str, results_dir: Path = RESULTS_DIR) -> List[D
 # Analysis Functions
 # =============================================================================
 
+def get_timing(r: Dict) -> Dict:
+    """Get timing dict from result, supporting both timing_ms and timing keys"""
+    return r.get("timing_ms") or r.get("timing", {})
+
+
+def get_total_ms(r: Dict) -> float:
+    """Get total_ms from result, supporting both field name formats"""
+    timing = get_timing(r)
+    return timing.get("total") or timing.get("total_ms", 0)
+
+
 def summarize_by_tool(results: List[Dict]) -> Dict[str, Dict]:
     """Summarize results grouped by tool name"""
     by_tool = defaultdict(list)
@@ -114,7 +125,7 @@ def summarize_by_tool(results: List[Dict]) -> Dict[str, Dict]:
 
     summary = {}
     for tool_name, measurements in by_tool.items():
-        total_times = [m["timing"]["total_ms"] for m in measurements if "timing" in m]
+        total_times = [get_total_ms(m) for m in measurements if get_timing(m)]
 
         summary[tool_name] = {
             "count": len(measurements),
@@ -137,7 +148,7 @@ def summarize_by_node(results: List[Dict]) -> Dict[str, Dict]:
 
     summary = {}
     for node, measurements in by_node.items():
-        total_times = [m["timing"]["total_ms"] for m in measurements if "timing" in m]
+        total_times = [get_total_ms(m) for m in measurements if get_timing(m)]
 
         summary[node] = {
             "count": len(measurements),
@@ -162,8 +173,8 @@ def compare_cold_warm(results: List[Dict]) -> Dict[str, Dict]:
         mode = r.get("mode", "cold")
         key = f"{tool_name}:{size_label}"
 
-        if "timing" in r:
-            grouped[key][mode].append(r["timing"]["total_ms"])
+        if get_timing(r):
+            grouped[key][mode].append(get_total_ms(r))
 
     for key, modes in grouped.items():
         cold_times = modes["cold"]
@@ -193,14 +204,16 @@ def analyze_time_decomposition(results: List[Dict]) -> Dict[str, Dict]:
         size_label = r.get("input_size_label", "unknown")
         key = f"{tool_name}:{size_label}"
 
-        if "timing" in r:
-            timing = r["timing"]
-            total = timing.get("total_ms", 0)
-            cold_start = timing.get("cold_start_ms", 0)
-            deser = timing.get("deser_ms", 0)
-            tool_exec = timing.get("tool_exec_ms", 0)
-            io_ms = timing.get("io_ms", 0)
-            compute = timing.get("compute_ms", 0)
+        # timing_ms 또는 timing 키 지원
+        timing = r.get("timing_ms") or r.get("timing", {})
+        if timing:
+            # _ms 접미사 있는 키와 없는 키 모두 지원
+            total = timing.get("total") or timing.get("total_ms", 0)
+            cold_start = timing.get("cold_start") or timing.get("cold_start_ms", 0)
+            deser = timing.get("deser") or timing.get("deser_ms", 0)
+            tool_exec = timing.get("tool_exec") or timing.get("tool_exec_ms", 0)
+            io_ms = timing.get("io") or timing.get("io_ms", 0)
+            compute = timing.get("compute") or timing.get("compute_ms", 0)
 
             if total > 0:
                 decomposition[key] = {
@@ -210,11 +223,8 @@ def analyze_time_decomposition(results: List[Dict]) -> Dict[str, Dict]:
                     "tool_exec_ms": tool_exec,
                     "io_ms": io_ms,
                     "compute_ms": compute,
-                    # Percentages relative to total
-                    "cold_start_pct": (cold_start / total) * 100,
-                    "deser_pct": (deser / total) * 100,
-                    "tool_exec_pct": (tool_exec / total) * 100,
-                    # Percentages relative to tool_exec
+                    # Percentages relative to tool_exec only
+                    # (cold_start, deser are measured separately)
                     "io_pct": (io_ms / tool_exec) * 100 if tool_exec > 0 else 0,
                     "compute_pct": (compute / tool_exec) * 100 if tool_exec > 0 else 0,
                 }
@@ -236,13 +246,14 @@ def analyze_scaling(results: List[Dict], tool_name: str) -> Dict[str, Dict]:
 
         key = f"{node}:{size_label}"
 
-        if "timing" in r:
+        total_ms = get_total_ms(r)
+        if total_ms > 0:
             scaling[key] = {
                 "node": node,
                 "size_label": size_label,
                 "input_size_bytes": input_size,
-                "total_ms": r["timing"]["total_ms"],
-                "throughput_mbps": (input_size / 1048576) / (r["timing"]["total_ms"] / 1000) if r["timing"]["total_ms"] > 0 else 0,
+                "total_ms": total_ms,
+                "throughput_mbps": (input_size / 1048576) / (total_ms / 1000) if total_ms > 0 else 0,
             }
 
     return scaling
@@ -307,32 +318,25 @@ def print_comparison_table(comparison: Dict[str, Dict]):
 
 def print_decomposition_table(decomposition: Dict[str, Dict]):
     """Print time decomposition table"""
-    print(f"\n{'='*120}")
+    print(f"\n{'='*110}")
     print("Execution Time Decomposition")
-    print("  cold_start: WASM loading time (measured separately, not part of fn_total)")
-    print("  fn_total = deser + tool_exec")
-    print("  tool_exec = io + compute")
-    print(f"{'='*120}")
+    print("  cold_start -> deser -> tool_exec (io + compute)")
+    print("  Percentages are relative to tool_exec only")
+    print(f"{'='*110}")
 
     if not decomposition:
         print("No decomposition data available (internal timing not captured)")
         return
 
-    print(f"{'Tool:Size':<25} {'Total':>8} {'ColdStart':>10} {'Deser':>12} {'ToolExec':>12} {'I/O':>12} {'Compute':>12}")
-    print(f"{'':<25} {'(ms)':>8} {'(ms)':>10} {'(ms/%)':>12} {'(ms/%)':>12} {'(ms/%)':>12} {'(ms/%)':>12}")
-    print("-" * 120)
+    print(f"{'Tool:Size':<25} {'Total':>8} {'ColdStart':>10} {'Deser':>10} {'ToolExec':>10} {'I/O':>12} {'Compute':>12}")
+    print(f"{'':<25} {'(ms)':>8} {'(ms)':>10} {'(ms)':>10} {'(ms)':>10} {'(ms/%)':>12} {'(ms/%)':>12}")
+    print("-" * 110)
 
     for key, values in sorted(decomposition.items()):
-        # Get fn_total (deser + tool_exec)
-        fn_total = values['deser_ms'] + values['tool_exec_ms']
-        # Percentages relative to fn_total (not total, since cold_start is separate)
-        deser_pct = (values['deser_ms'] / fn_total * 100) if fn_total > 0 else 0
-        tool_exec_pct = (values['tool_exec_ms'] / fn_total * 100) if fn_total > 0 else 0
-
         print(f"{key:<25} {values['total_ms']:>8.2f} "
               f"{values['cold_start_ms']:>10.2f} "
-              f"{values['deser_ms']:>6.1f}/{deser_pct:>4.0f}% "
-              f"{values['tool_exec_ms']:>6.1f}/{tool_exec_pct:>4.0f}% "
+              f"{values['deser_ms']:>10.2f} "
+              f"{values['tool_exec_ms']:>10.2f} "
               f"{values['io_ms']:>6.1f}/{values['io_pct']:>4.0f}% "
               f"{values['compute_ms']:>6.1f}/{values['compute_pct']:>4.0f}%")
 
@@ -359,8 +363,9 @@ def export_to_csv(results: List[Dict], output_path: Path):
             "timestamp": r.get("timestamp"),
         }
 
-        if "timing" in r:
-            for k, v in r["timing"].items():
+        timing = get_timing(r)
+        if timing:
+            for k, v in timing.items():
                 flat[f"timing_{k}"] = v
 
         if "timing_std" in r:
@@ -388,8 +393,9 @@ def plot_node_comparison(results: List[Dict], tool_name: str, output_path: Optio
             continue
         node = r.get("node", "unknown")
         size = r.get("input_size_label", "unknown")
-        if "timing" in r:
-            data[node][size].append(r["timing"]["total_ms"])
+        total_ms = get_total_ms(r)
+        if total_ms > 0:
+            data[node][size].append(total_ms)
 
     if not data:
         print(f"No data for tool: {tool_name}")
@@ -449,14 +455,16 @@ def plot_time_decomposition(results: List[Dict], tool_name: str, output_path: Op
         label = f"{r.get('node', '')}:{r.get('input_size_label', '')}"
         labels.append(label)
 
-        timing = r.get("timing", {})
-        total = timing.get("total_ms", 1)  # Avoid division by zero
+        # timing_ms 또는 timing 키 지원
+        timing = r.get("timing_ms") or r.get("timing", {})
+        total = timing.get("total") or timing.get("total_ms", 1)  # Avoid division by zero
 
         # Get component times (decomposition: cold_start + deser + io + compute)
-        cs = timing.get("cold_start_ms", 0)
-        deser = timing.get("deser_ms", 0)
-        io = timing.get("io_ms", 0)
-        comp = timing.get("compute_ms", 0)
+        # _ms 접미사 있는 키와 없는 키 모두 지원
+        cs = timing.get("cold_start") or timing.get("cold_start_ms", 0)
+        deser = timing.get("deser") or timing.get("deser_ms", 0)
+        io = timing.get("io") or timing.get("io_ms", 0)
+        comp = timing.get("compute") or timing.get("compute_ms", 0)
 
         # If no internal timing, attribute all to "compute" (unknown)
         if cs + deser + io + comp == 0:

@@ -629,19 +629,10 @@ def process_results(
         timing["cold_start_ms"] = timing["total_ms"]
 
     # profiling: 각 컴포넌트의 비율 (%) 계산
-    # cold_start는 별도 측정 (비율 계산에서 제외)
-    # fn_total = deser + tool_exec
-    # tool_exec = io + compute
-    fn_total = timing["fn_total_ms"]
+    # cold_start, deser는 별도 측정 (비율 계산에서 제외)
+    # tool_exec = io + compute (여기서만 비율 계산)
     tool_exec = timing["tool_exec_ms"]
     timing_pct = {}
-    if fn_total > 0:
-        # fn_total 기준: deser + tool_exec = fn_total
-        timing_pct["deser_pct"] = round(timing["deser_ms"] / fn_total * 100, 2)
-        timing_pct["tool_exec_pct"] = round(tool_exec / fn_total * 100, 2)
-    else:
-        timing_pct["deser_pct"] = 0
-        timing_pct["tool_exec_pct"] = 0
     if tool_exec > 0:
         # tool_exec 기준: io + compute = tool_exec
         timing_pct["io_pct"] = round(timing["io_ms"] / tool_exec * 100, 2)
