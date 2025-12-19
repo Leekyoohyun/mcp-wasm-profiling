@@ -403,7 +403,7 @@ def measure_cold_start(
 
         # Check for errors
         if result.returncode != 0:
-            print(f"    wasmtime error: {result.stderr[:100]}", file=sys.stderr)
+            print(f"    wasmtime error: {result.stderr[:500]}", file=sys.stderr)
             return TimingResult(run_id=0, total_ms=-1)
 
         return TimingResult(
