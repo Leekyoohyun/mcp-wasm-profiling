@@ -607,6 +607,10 @@ def process_results(
         timing["tool_exec_ms"] = max(0.0, timing["fn_total_ms"] - timing["deser_ms"])
         internal_timings_avg["tool_exec_ms"] = timing["tool_exec_ms"]
 
+        # compute_ms 재계산 (tool_exec - io, Rust에서 fn_total - io로 잘못 계산되므로)
+        timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - timing["io_ms"])
+        internal_timings_avg["compute_ms"] = timing["compute_ms"]
+
         # wasm_total_ms 파싱 (from ---WASM_TOTAL---)
         wasm_total_values = [t.get("wasm_total_ms", 0) for t in raw_internal_timings]
         if any(v > 0 for v in wasm_total_values):
