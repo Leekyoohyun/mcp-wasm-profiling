@@ -338,7 +338,7 @@ def process_results(
     # Build timing_ms dict matching stdio format
     # HTTP mode: cold_start = server_startup, tool_exec = request_ms
     # json_parse = 0 (cannot measure in HTTP mode)
-    # io = request_ms (network I/O), compute = 0
+    # network_io = request_ms (network I/O), compute = 0
     cold_start = round(statistics.mean(startup_times), 3)
     tool_exec = round(statistics.mean(request_times), 3)
 
@@ -346,13 +346,15 @@ def process_results(
         "cold_start": cold_start,
         "json_parse": 0.0,  # Cannot measure in HTTP mode
         "tool_exec": tool_exec,
-        "io": tool_exec,  # HTTP request is I/O
+        "disk_io": 0.0,
+        "network_io": tool_exec,  # HTTP request is network I/O
         "compute": 0.0,
     }
 
-    # timing_pct: io/compute percentage of tool_exec
+    # timing_pct: disk_io/network_io/compute percentage of tool_exec
     timing_pct = {
-        "io_pct": 100.0,  # HTTP mode: all I/O
+        "disk_io_pct": 0.0,
+        "network_io_pct": 100.0,  # HTTP mode: all network I/O
         "compute_pct": 0.0,
     }
 
@@ -515,11 +517,11 @@ Examples:
         print("\n" + "=" * 60)
         print("Summary (HTTP Cold Start)")
         print("=" * 60)
-        print(f"{'Tool':<25} {'cold_start':<15} {'tool_exec':<15} {'io':<15}")
+        print(f"{'Tool':<25} {'cold_start':<15} {'tool_exec':<15} {'network_io':<15}")
         print("-" * 70)
         for m in all_measurements:
             t = m.timing_ms
-            print(f"{m.tool_name:<25} {t['cold_start']:<15.2f} {t['tool_exec']:<15.2f} {t['io']:<15.2f}")
+            print(f"{m.tool_name:<25} {t['cold_start']:<15.2f} {t['tool_exec']:<15.2f} {t['network_io']:<15.2f}")
     else:
         print("\nNo measurements collected", file=sys.stderr)
 

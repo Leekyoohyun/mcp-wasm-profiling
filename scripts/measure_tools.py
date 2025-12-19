@@ -75,68 +75,79 @@ SERVER_WASM_MAP = {
     'log-parser': 'mcp_server_log_parser.wasm',
     'time': 'mcp_server_time.wasm',
     'sequential-thinking': 'mcp_server_sequential_thinking.wasm',
+    'summarize': 'mcp_server_summarize.wasm',
+    'fetch': 'mcp_server_fetch.wasm',
 }
 
 # Tool test configurations (single size per tool - 비율 측정용)
+# io_type: "disk" (filesystem/git), "network" (summarize/fetch), "none" (pure compute)
 TOOL_CONFIGS = {
-    # ===== filesystem (14 tools) =====
-    "read_file": {"server": "filesystem", "test_sizes": ["10MB"]},
-    "read_text_file": {"server": "filesystem", "test_sizes": ["10MB"]},
-    "read_media_file": {"server": "filesystem", "test_sizes": ["default"]},
-    "read_multiple_files": {"server": "filesystem", "test_sizes": ["default"]},
-    "write_file": {"server": "filesystem", "test_sizes": ["10MB"]},
-    "edit_file": {"server": "filesystem", "test_sizes": ["default"]},
-    "create_directory": {"server": "filesystem", "test_sizes": ["default"]},
-    "list_directory": {"server": "filesystem", "test_sizes": ["100files"]},
-    "list_directory_with_sizes": {"server": "filesystem", "test_sizes": ["100files"]},
-    "directory_tree": {"server": "filesystem", "test_sizes": ["default"]},
-    "move_file": {"server": "filesystem", "test_sizes": ["default"]},
-    "search_files": {"server": "filesystem", "test_sizes": ["default"]},
-    "get_file_info": {"server": "filesystem", "test_sizes": ["default"]},
-    "list_allowed_directories": {"server": "filesystem", "test_sizes": ["default"]},
+    # ===== filesystem (14 tools) - disk I/O =====
+    "read_file": {"server": "filesystem", "test_sizes": ["10MB"], "io_type": "disk"},
+    "read_text_file": {"server": "filesystem", "test_sizes": ["10MB"], "io_type": "disk"},
+    "read_media_file": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "read_multiple_files": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "write_file": {"server": "filesystem", "test_sizes": ["10MB"], "io_type": "disk"},
+    "edit_file": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "create_directory": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "list_directory": {"server": "filesystem", "test_sizes": ["100files"], "io_type": "disk"},
+    "list_directory_with_sizes": {"server": "filesystem", "test_sizes": ["100files"], "io_type": "disk"},
+    "directory_tree": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "move_file": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "search_files": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "get_file_info": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
+    "list_allowed_directories": {"server": "filesystem", "test_sizes": ["default"], "io_type": "disk"},
 
-    # ===== git (12 tools) =====
-    "git_status": {"server": "git", "test_sizes": ["default"]},
-    "git_log": {"server": "git", "test_sizes": ["default"]},
-    "git_show": {"server": "git", "test_sizes": ["default"]},
-    "git_branch": {"server": "git", "test_sizes": ["default"]},
-    "git_diff_unstaged": {"server": "git", "test_sizes": ["default"]},
-    "git_diff_staged": {"server": "git", "test_sizes": ["default"]},
-    "git_diff": {"server": "git", "test_sizes": ["default"]},
-    "git_commit": {"server": "git", "test_sizes": ["default"]},
-    "git_add": {"server": "git", "test_sizes": ["default"]},
-    "git_reset": {"server": "git", "test_sizes": ["default"]},
-    "git_create_branch": {"server": "git", "test_sizes": ["default"]},
-    "git_checkout": {"server": "git", "test_sizes": ["default"]},
+    # ===== git (12 tools) - disk I/O =====
+    "git_status": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_log": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_show": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_branch": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_diff_unstaged": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_diff_staged": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_diff": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_commit": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_add": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_reset": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_create_branch": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
+    "git_checkout": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
 
-    # ===== image-resize (6 tools) =====
-    "get_image_info": {"server": "image-resize", "test_sizes": ["default"]},
-    "resize_image": {"server": "image-resize", "test_sizes": ["default"]},
-    "scan_directory": {"server": "image-resize", "test_sizes": ["default"]},
-    "compute_image_hash": {"server": "image-resize", "test_sizes": ["default"]},
-    "compare_hashes": {"server": "image-resize", "test_sizes": ["default"]},
-    "batch_resize": {"server": "image-resize", "test_sizes": ["default"]},
+    # ===== image-resize (6 tools) - disk I/O =====
+    "get_image_info": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "resize_image": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "scan_directory": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "compute_image_hash": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "compare_hashes": {"server": "image-resize", "test_sizes": ["default"], "io_type": "none"},
+    "batch_resize": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
 
-    # ===== data-aggregate (5 tools) =====
-    "aggregate_list": {"server": "data-aggregate", "test_sizes": ["default"]},
-    "merge_summaries": {"server": "data-aggregate", "test_sizes": ["default"]},
-    "combine_research_results": {"server": "data-aggregate", "test_sizes": ["default"]},
-    "deduplicate": {"server": "data-aggregate", "test_sizes": ["default"]},
-    "compute_trends": {"server": "data-aggregate", "test_sizes": ["default"]},
+    # ===== data-aggregate (5 tools) - pure compute =====
+    "aggregate_list": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
+    "merge_summaries": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
+    "combine_research_results": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
+    "deduplicate": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
+    "compute_trends": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
 
-    # ===== log-parser (5 tools) =====
-    "parse_logs": {"server": "log-parser", "test_sizes": ["1000lines"]},
-    "filter_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
-    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["1000lines"]},
-    "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
-    "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    # ===== log-parser (5 tools) - pure compute =====
+    "parse_logs": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
+    "filter_entries": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
+    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
+    "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
+    "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
 
-    # ===== time (2 tools) =====
-    "get_current_time": {"server": "time", "test_sizes": ["default"]},
-    "convert_time": {"server": "time", "test_sizes": ["default"]},
+    # ===== time (2 tools) - pure compute =====
+    "get_current_time": {"server": "time", "test_sizes": ["default"], "io_type": "none"},
+    "convert_time": {"server": "time", "test_sizes": ["default"], "io_type": "none"},
 
-    # ===== sequential-thinking (1 tool) =====
-    "sequentialthinking": {"server": "sequential-thinking", "test_sizes": ["default"]},
+    # ===== sequential-thinking (1 tool) - pure compute =====
+    "sequentialthinking": {"server": "sequential-thinking", "test_sizes": ["default"], "io_type": "none"},
+
+    # ===== summarize (3 tools) - network I/O =====
+    "summarize_text": {"server": "summarize", "test_sizes": ["default"], "needs_http": True, "io_type": "network"},
+    "summarize_documents": {"server": "summarize", "test_sizes": ["default"], "needs_http": True, "io_type": "network"},
+    "get_provider_info": {"server": "summarize", "test_sizes": ["default"], "needs_http": True, "io_type": "none"},
+
+    # ===== fetch (1 tool) - network I/O =====
+    "fetch": {"server": "fetch", "test_sizes": ["default"], "needs_http": True, "io_type": "network"},
 }
 
 
@@ -293,7 +304,8 @@ def measure_cold_start(
     wasm_path: Path,
     tool_name: str,
     payload: Dict[str, Any],
-    allowed_dirs: list = None
+    allowed_dirs: list = None,
+    needs_http: bool = False
 ) -> TimingResult:
     """
     Measure cold start using subprocess (new wasmtime process each time).
@@ -326,11 +338,19 @@ def measure_cold_start(
                     key, value = line.split("=", 1)
                     env[key] = value
 
+    # Build wasmtime command
+    cmd = ["wasmtime", "run"]
+    if needs_http:
+        cmd.extend(["-S", "http"])  # Enable outbound HTTP via wasi:http
+    cmd.extend(dir_args)
+    cmd.extend(["--env", "OPENAI_API_KEY", "--env", "UPSTAGE_API_KEY"])
+    cmd.append(str(wasm_path))
+
     start_time = time.perf_counter()
 
     try:
         result = subprocess.run(
-            ["wasmtime", "run"] + dir_args + ["--env", "OPENAI_API_KEY"] + [str(wasm_path)],
+            cmd,
             input=json_input,
             capture_output=True,
             text=True,
@@ -416,7 +436,8 @@ def measure_cold_start_multiple(
     payload: Dict[str, Any],
     runs: int = DEFAULT_RUNS,
     warmup_runs: int = DEFAULT_WARMUP_RUNS,
-    allowed_dirs: list = None
+    allowed_dirs: list = None,
+    needs_http: bool = False
 ) -> List[TimingResult]:
     """Run multiple cold start measurements (synchronous, subprocess-based)"""
     results = []
@@ -424,14 +445,14 @@ def measure_cold_start_multiple(
     # Warmup runs
     print(f"    Warmup ({warmup_runs})...", end="", flush=True)
     for _ in range(warmup_runs):
-        measure_cold_start(wasm_path, tool_name, payload, allowed_dirs)
+        measure_cold_start(wasm_path, tool_name, payload, allowed_dirs, needs_http)
         print(".", end="", flush=True)
     print(" done")
 
     # Actual measurements
     print(f"    Measuring ({runs})...", end="", flush=True)
     for i in range(runs):
-        result = measure_cold_start(wasm_path, tool_name, payload, allowed_dirs)
+        result = measure_cold_start(wasm_path, tool_name, payload, allowed_dirs, needs_http)
         result.run_id = i + 1
         results.append(result)
         print(".", end="", flush=True)
@@ -526,7 +547,8 @@ def process_results(
     input_size: int,
     input_size_label: str,
     output_size: int,
-    results: List[TimingResult]
+    results: List[TimingResult],
+    io_type: str = "none"  # "disk", "network", or "none"
 ) -> Optional[ToolMeasurement]:
     """Process timing results into a ToolMeasurement"""
 
@@ -543,13 +565,14 @@ def process_results(
     # total = cold_start + wasm_total
     # cold_start = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
     # wasm_total = json_parse + tool_exec + 기타
-    # tool_exec = io + compute
+    # tool_exec = disk_io + network_io + compute
     timing = {
         "total_ms": statistics.mean(total_times),
         "cold_start_ms": 0.0,      # total - wasm_total
         "json_parse_ms": 0.0,      # JSON 파싱 시간
         "tool_exec_ms": 0.0,       # 도구 실행 시간
-        "io_ms": 0.0,              # I/O 시간
+        "disk_io_ms": 0.0,         # 디스크 I/O 시간
+        "network_io_ms": 0.0,      # 네트워크 I/O 시간
         "compute_ms": 0.0,         # tool_exec - io
     }
 
@@ -558,7 +581,8 @@ def process_results(
         "cold_start_ms": 0.0,
         "json_parse_ms": 0.0,
         "tool_exec_ms": 0.0,
-        "io_ms": 0.0,
+        "disk_io_ms": 0.0,
+        "network_io_ms": 0.0,
         "compute_ms": 0.0,
     }
 
@@ -594,17 +618,24 @@ def process_results(
             timing_std["tool_exec_ms"] = std_val
             internal_timings_avg["tool_exec_ms"] = avg_val
 
-        # io_ms 파싱 (from ---IO---)
+        # io_ms 파싱 (from ---IO---) → io_type에 따라 disk_io 또는 network_io로 분류
         io_values = [t.get("io_ms", 0) for t in raw_internal_timings]
         if any(v > 0 for v in io_values):
             avg_val = statistics.mean(io_values)
             std_val = statistics.stdev(io_values) if len(io_values) > 1 else 0.0
-            timing["io_ms"] = avg_val
-            timing_std["io_ms"] = std_val
-            internal_timings_avg["io_ms"] = avg_val
 
-        # compute_ms = tool_exec - io
-        timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - timing["io_ms"])
+            if io_type == "disk":
+                timing["disk_io_ms"] = avg_val
+                timing_std["disk_io_ms"] = std_val
+                internal_timings_avg["disk_io_ms"] = avg_val
+            elif io_type == "network":
+                timing["network_io_ms"] = avg_val
+                timing_std["network_io_ms"] = std_val
+                internal_timings_avg["network_io_ms"] = avg_val
+
+        # compute_ms = tool_exec - (disk_io + network_io)
+        total_io = timing["disk_io_ms"] + timing["network_io_ms"]
+        timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - total_io)
         internal_timings_avg["compute_ms"] = timing["compute_ms"]
 
         # cold_start_ms = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
@@ -626,14 +657,16 @@ def process_results(
         # internal timing이 없으면 전체 시간을 cold_start로 간주
         timing["cold_start_ms"] = timing["total_ms"]
 
-    # profiling: tool_exec 중 io, compute 비율만 계산
+    # profiling: tool_exec 중 disk_io, network_io, compute 비율 계산
     tool_exec = timing["tool_exec_ms"]
     timing_pct = {}
     if tool_exec > 0:
-        timing_pct["io_pct"] = round(timing["io_ms"] / tool_exec * 100, 2)
+        timing_pct["disk_io_pct"] = round(timing["disk_io_ms"] / tool_exec * 100, 2)
+        timing_pct["network_io_pct"] = round(timing["network_io_ms"] / tool_exec * 100, 2)
         timing_pct["compute_pct"] = round(timing["compute_ms"] / tool_exec * 100, 2)
     else:
-        timing_pct["io_pct"] = 0
+        timing_pct["disk_io_pct"] = 0
+        timing_pct["network_io_pct"] = 0
         timing_pct["compute_pct"] = 0
 
     return ToolMeasurement(
@@ -882,6 +915,18 @@ async def run_tool_measurement(
             "totalThoughts": 5
         }
 
+    # ===== summarize tools =====
+    if tool_name == "summarize_text":
+        payload = {"text": "This is a test document. " * 50, "max_length": 100}
+    elif tool_name == "summarize_documents":
+        payload = {"documents": ["Doc content " * 20], "max_length_per_doc": 100}
+    elif tool_name == "get_provider_info":
+        payload = {}
+
+    # ===== fetch tools =====
+    if tool_name == "fetch":
+        payload = {"url": "https://httpbin.org/get"}
+
     # payload가 설정되지 않은 경우
     if payload is None:
         print(f"Tool {tool_name} not yet configured", file=sys.stderr)
@@ -891,7 +936,11 @@ async def run_tool_measurement(
     if input_size == 0 and payload:
         input_size = len(json.dumps(payload))
 
-    print(f"\n[{tool_name}] Input: {input_size_label} ({input_size} bytes), Mode: {mode}")
+    # Check if tool needs outbound HTTP
+    needs_http = config.get("needs_http", False)
+
+    print(f"\n[{tool_name}] Input: {input_size_label} ({input_size} bytes), Mode: {mode}" +
+          (" (HTTP)" if needs_http else ""))
 
     # profiling: 기본 디렉토리 설정 (test_data + /tmp)
     if allowed_dirs is None:
@@ -902,7 +951,8 @@ async def run_tool_measurement(
         # Cold start: subprocess (synchronous) - new process each time
         results = measure_cold_start_multiple(
             wasm_file, tool_name, payload,
-            runs=runs, allowed_dirs=allowed_dirs
+            runs=runs, allowed_dirs=allowed_dirs,
+            needs_http=needs_http
         )
     else:  # warm
         # Warm start: MCP client (async) - reuse session
@@ -911,9 +961,12 @@ async def run_tool_measurement(
             runs=runs, allowed_dirs=allowed_dirs
         )
 
+    # Get io_type for this tool
+    io_type = config.get("io_type", "none")
+
     # Process results
     measurement = process_results(
-        tool_name, mode, input_size, input_size_label, output_size, results
+        tool_name, mode, input_size, input_size_label, output_size, results, io_type
     )
 
     if measurement:
@@ -956,8 +1009,9 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
         # cold_start = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
         # json_parse = JSON 파싱 시간 (---JSON_PARSE---)
         # tool_exec = 도구 실행 시간 (---TOOL_EXEC---)
-        # io = I/O 시간 (---IO---)
-        # compute = tool_exec - io
+        # disk_io = 디스크 I/O 시간
+        # network_io = 네트워크 I/O 시간
+        # compute = tool_exec - (disk_io + network_io)
         summary["tools"][key] = {
             "tool_name": m.tool_name,
             "input_size": m.input_size,
@@ -967,7 +1021,8 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
                 "cold_start": round(m.timing["cold_start_ms"], 3),
                 "json_parse": round(m.timing["json_parse_ms"], 3),
                 "tool_exec": round(m.timing["tool_exec_ms"], 3),
-                "io": round(m.timing["io_ms"], 3),
+                "disk_io": round(m.timing["disk_io_ms"], 3),
+                "network_io": round(m.timing["network_io_ms"], 3),
                 "compute": round(m.timing["compute_ms"], 3),
             },
             "timing_pct": m.timing_pct,
