@@ -97,12 +97,11 @@ class ToolMeasurement:
     node: str
     runs: int
     timestamp: str
+    transport: str  # "http"
 
-    # Timing statistics (ms)
-    total_ms: float
-    total_std_ms: float
-    server_startup_ms: float  # wasmtime serve startup time
-    request_ms: float         # HTTP request round-trip time
+    # Timing statistics (ms) - matching stdio format
+    timing: Dict[str, float]
+    timing_std: Dict[str, float]
 
     measurements: List[float]
 
@@ -203,9 +202,18 @@ def measure_http_cold_start(
     total_start = time.perf_counter()
 
     try:
-        # Start wasmtime serve
+        # Start wasmtime serve (with env vars for API keys)
+        cmd = [
+            "wasmtime", "serve",
+            "-S", "cli",
+            "--env", "OPENAI_API_KEY",
+            "--env", "UPSTAGE_API_KEY",
+            "--env", "SUMMARIZE_PROVIDER",
+            "--addr", f"127.0.0.1:{port}",
+            str(wasm_path)
+        ]
         proc = subprocess.Popen(
-            ["wasmtime", "serve", "-S", "cli", "--addr", f"127.0.0.1:{port}", str(wasm_path)],
+            cmd,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -245,6 +253,10 @@ def measure_http_cold_start(
                     resp_json = json.loads(result_body)
                     if "error" in resp_json:
                         print(f"    Tool error: {resp_json['error']}", file=sys.stderr)
+                    # Debug: show result preview
+                    if os.environ.get("DEBUG"):
+                        result_str = str(resp_json.get("result", ""))[:200]
+                        print(f"    Response: {result_str}...", file=sys.stderr)
                 except json.JSONDecodeError:
                     pass
 
@@ -328,15 +340,31 @@ def process_results(
     startup_times = [r.server_startup_ms for r in valid_results]
     request_times = [r.request_ms for r in valid_results]
 
+    # Build timing dict matching stdio format
+    # HTTP mode: cold_start = server_startup, tool_exec = request_ms
+    # (cannot decompose io/compute in HTTP mode)
+    timing = {
+        "cold_start_ms": statistics.mean(startup_times),
+        "tool_exec_ms": statistics.mean(request_times),
+        "io_ms": 0.0,  # Cannot measure in HTTP mode
+        "compute_ms": statistics.mean(request_times),  # Assume all compute
+    }
+
+    timing_std = {
+        "cold_start_ms": statistics.stdev(startup_times) if len(startup_times) > 1 else 0.0,
+        "tool_exec_ms": statistics.stdev(request_times) if len(request_times) > 1 else 0.0,
+        "io_ms": 0.0,
+        "compute_ms": statistics.stdev(request_times) if len(request_times) > 1 else 0.0,
+    }
+
     return ToolMeasurement(
         tool_name=tool_name,
         node=get_node_name(),
         runs=len(valid_results),
         timestamp=datetime.now().isoformat(),
-        total_ms=statistics.mean(total_times),
-        total_std_ms=statistics.stdev(total_times) if len(total_times) > 1 else 0.0,
-        server_startup_ms=statistics.mean(startup_times),
-        request_ms=statistics.mean(request_times),
+        transport="http",
+        timing=timing,
+        timing_std=timing_std,
         measurements=total_times
     )
 
@@ -383,9 +411,9 @@ def run_tool_measurement(
     measurement = process_results(tool_name, results)
 
     if measurement:
-        print(f"    Total:    {measurement.total_ms:.2f}ms (std: {measurement.total_std_ms:.2f}ms)")
-        print(f"    Startup:  {measurement.server_startup_ms:.2f}ms (wasmtime serve)")
-        print(f"    Request:  {measurement.request_ms:.2f}ms (HTTP round-trip)")
+        t = measurement.timing
+        print(f"    cold_start: {t['cold_start_ms']:.2f}ms")
+        print(f"    tool_exec:  {t['tool_exec_ms']:.2f}ms (HTTP request)")
 
     return measurement
 
@@ -480,10 +508,11 @@ Examples:
         print("\n" + "=" * 60)
         print("Summary (HTTP Cold Start)")
         print("=" * 60)
-        print(f"{'Tool':<25} {'Total (ms)':<15} {'Startup (ms)':<15} {'Request (ms)':<15}")
-        print("-" * 70)
+        print(f"{'Tool':<25} {'cold_start':<15} {'tool_exec':<15}")
+        print("-" * 55)
         for m in all_measurements:
-            print(f"{m.tool_name:<25} {m.total_ms:<15.2f} {m.server_startup_ms:<15.2f} {m.request_ms:<15.2f}")
+            t = m.timing
+            print(f"{m.tool_name:<25} {t['cold_start_ms']:<15.2f} {t['tool_exec_ms']:<15.2f}")
     else:
         print("\nNo measurements collected", file=sys.stderr)
 
