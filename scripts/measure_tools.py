@@ -76,6 +76,7 @@ SERVER_WASM_MAP = {
     'summarize': 'mcp_server_summarize.wasm',
     'time': 'mcp_server_time.wasm',
     'fetch': 'mcp_server_fetch.wasm',
+    'sequential-thinking': 'mcp_server_sequential_thinking.wasm',
 }
 
 # Tool test configurations (single size per tool - 비율 측정용)
@@ -132,17 +133,20 @@ TOOL_CONFIGS = {
     "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
     "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"]},
 
-    # ===== summarize (3 tools) - SKIP: requires LLM API key =====
-    # "summarize_text": {"server": "summarize", "test_sizes": ["default"]},
-    # "summarize_documents": {"server": "summarize", "test_sizes": ["default"]},
-    # "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
+    # ===== summarize (3 tools) =====
+    "summarize_text": {"server": "summarize", "test_sizes": ["default"]},
+    "summarize_documents": {"server": "summarize", "test_sizes": ["default"]},
+    "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
 
     # ===== time (2 tools) =====
     "get_current_time": {"server": "time", "test_sizes": ["default"]},
     "convert_time": {"server": "time", "test_sizes": ["default"]},
 
-    # ===== fetch (1 tool) - SKIP: network dependent =====
-    # "fetch": {"server": "fetch", "test_sizes": ["default"]},
+    # ===== fetch (1 tool) =====
+    "fetch": {"server": "fetch", "test_sizes": ["default"]},
+
+    # ===== sequential-thinking (1 tool) =====
+    "sequentialthinking": {"server": "sequential-thinking", "test_sizes": ["default"]},
 }
 
 
@@ -878,6 +882,15 @@ async def run_tool_measurement(
     # ===== fetch tools =====
     if tool_name == "fetch":
         payload = {"url": "https://httpbin.org/get"}
+
+    # ===== sequential-thinking tools =====
+    if tool_name == "sequentialthinking":
+        payload = {
+            "thought": "This is a test thought for profiling. " * 100,
+            "nextThoughtNeeded": True,
+            "thoughtNumber": 1,
+            "totalThoughts": 5
+        }
 
     # payload가 설정되지 않은 경우
     if payload is None:
