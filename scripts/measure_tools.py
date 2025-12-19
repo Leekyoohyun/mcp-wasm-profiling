@@ -338,11 +338,23 @@ def measure_cold_start(
         # Parse response for internal timing
         internal_timing = None
         wasm_total_ms = None
+        cold_start_ms = None
+        deser_ms = None
 
-        # profiling: stderr에서 ---WASM_TOTAL--- 및 ---TIMING--- 형식 파싱
+        # profiling: stderr에서 ---COLD_START---, ---DESER---, ---TIMING---, ---WASM_TOTAL--- 파싱
         if result.stderr:
             for line in result.stderr.strip().split('\n'):
-                if line.startswith("---WASM_TOTAL---"):
+                if line.startswith("---COLD_START---"):
+                    try:
+                        cold_start_ms = float(line[len("---COLD_START---"):])
+                    except ValueError:
+                        pass
+                elif line.startswith("---DESER---"):
+                    try:
+                        deser_ms = float(line[len("---DESER---"):])
+                    except ValueError:
+                        pass
+                elif line.startswith("---WASM_TOTAL---"):
                     try:
                         wasm_total_ms = float(line[len("---WASM_TOTAL---"):])
                     except ValueError:
@@ -354,10 +366,14 @@ def measure_cold_start(
                     except json.JSONDecodeError:
                         pass
 
-        # wasm_total_ms를 internal_timing에 추가
+        # internal_timing에 cold_start_ms, deser_ms, wasm_total_ms 추가
+        if internal_timing is None:
+            internal_timing = {}
+        if cold_start_ms is not None:
+            internal_timing["cold_start_ms"] = cold_start_ms
+        if deser_ms is not None:
+            internal_timing["deser_ms"] = deser_ms
         if wasm_total_ms is not None:
-            if internal_timing is None:
-                internal_timing = {}
             internal_timing["wasm_total_ms"] = wasm_total_ms
 
         # Fallback: stdout에서 _timing 필드 찾기 (기존 방식)
@@ -519,13 +535,19 @@ def process_results(
     # Calculate statistics
     total_times = [r.total_ms for r in valid_results]
 
-    # 새로운 분해 방식 (simplified):
-    # cold_start_ms = total - fn_total (WASM 로딩 + Tokio + MCP 오버헤드)
-    # fn_total_ms = io + compute (함수 본체)
+    # 새로운 분해 방식:
+    # cold_start_ms = WASM 로딩 시간 (---COLD_START---)
+    # deser_ms = JSON 역직렬화 시간 (---DESER---)
+    # fn_total_ms = deser + tool_exec (---TIMING---)
+    # tool_exec_ms = fn_total - deser (순수 도구 실행)
+    # io_ms = I/O 시간 (measure_io로 측정)
+    # compute_ms = tool_exec - io
     timing = {
         "total_ms": statistics.mean(total_times),
-        "cold_start_ms": 0.0,      # total - fn_total (WASM cold start)
-        "fn_total_ms": 0.0,        # tool 함수 실행 시간
+        "cold_start_ms": 0.0,      # WASM 로딩 시간
+        "deser_ms": 0.0,           # JSON 역직렬화 시간
+        "fn_total_ms": 0.0,        # deser + tool_exec
+        "tool_exec_ms": 0.0,       # 순수 도구 실행 시간
         "io_ms": 0.0,
         "compute_ms": 0.0,
     }
@@ -533,7 +555,9 @@ def process_results(
     timing_std = {
         "total_ms": statistics.stdev(total_times) if len(total_times) > 1 else 0.0,
         "cold_start_ms": 0.0,
+        "deser_ms": 0.0,
         "fn_total_ms": 0.0,
+        "tool_exec_ms": 0.0,
         "io_ms": 0.0,
         "compute_ms": 0.0,
     }
@@ -549,6 +573,24 @@ def process_results(
     if raw_internal_timings:
         internal_timings_avg = {}
 
+        # cold_start_ms 파싱 (from ---COLD_START--- - 정확한 WASM 로딩 시간)
+        cold_start_values = [t.get("cold_start_ms", 0) for t in raw_internal_timings]
+        if any(v > 0 for v in cold_start_values):
+            avg_val = statistics.mean(cold_start_values)
+            std_val = statistics.stdev(cold_start_values) if len(cold_start_values) > 1 else 0.0
+            timing["cold_start_ms"] = avg_val
+            timing_std["cold_start_ms"] = std_val
+            internal_timings_avg["cold_start_ms"] = avg_val
+
+        # deser_ms 파싱 (from ---DESER--- - JSON 역직렬화 시간)
+        deser_values = [t.get("deser_ms", 0) for t in raw_internal_timings]
+        if any(v > 0 for v in deser_values):
+            avg_val = statistics.mean(deser_values)
+            std_val = statistics.stdev(deser_values) if len(deser_values) > 1 else 0.0
+            timing["deser_ms"] = avg_val
+            timing_std["deser_ms"] = std_val
+            internal_timings_avg["deser_ms"] = avg_val
+
         # fn_total_ms, io_ms, compute_ms 파싱 (from ---TIMING---)
         for key in ["fn_total_ms", "io_ms", "compute_ms"]:
             values = [t.get(key, 0) for t in raw_internal_timings]
@@ -556,40 +598,48 @@ def process_results(
                 avg_val = statistics.mean(values)
                 std_val = statistics.stdev(values) if len(values) > 1 else 0.0
                 internal_timings_avg[key] = avg_val
-                if key in ["fn_total_ms", "io_ms", "compute_ms"]:
-                    timing[key] = avg_val
-                    timing_std[key] = std_val
+                timing[key] = avg_val
+                timing_std[key] = std_val
             else:
                 internal_timings_avg[key] = 0.0
+
+        # tool_exec_ms 계산 (fn_total - deser = 순수 도구 실행 시간)
+        timing["tool_exec_ms"] = max(0.0, timing["fn_total_ms"] - timing["deser_ms"])
+        internal_timings_avg["tool_exec_ms"] = timing["tool_exec_ms"]
 
         # wasm_total_ms 파싱 (from ---WASM_TOTAL---)
         wasm_total_values = [t.get("wasm_total_ms", 0) for t in raw_internal_timings]
         if any(v > 0 for v in wasm_total_values):
             internal_timings_avg["wasm_total_ms"] = statistics.mean(wasm_total_values)
 
-        # cold_start = total - fn_total (WASM 로딩 + Tokio + MCP 오버헤드)
-        fn_total_ms = timing.get("fn_total_ms", 0.0)
-        if fn_total_ms > 0:
-            timing["cold_start_ms"] = max(0.0, timing["total_ms"] - fn_total_ms)
-        else:
-            timing["cold_start_ms"] = timing["total_ms"]
-
-        internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
+        # cold_start가 없으면 fallback: total - fn_total
+        if timing["cold_start_ms"] == 0.0:
+            fn_total_ms = timing.get("fn_total_ms", 0.0)
+            if fn_total_ms > 0:
+                timing["cold_start_ms"] = max(0.0, timing["total_ms"] - fn_total_ms)
+            else:
+                timing["cold_start_ms"] = timing["total_ms"]
+            internal_timings_avg["cold_start_ms"] = timing["cold_start_ms"]
     else:
         # internal timing이 없으면 전체 시간을 cold_start로 간주
         timing["cold_start_ms"] = timing["total_ms"]
 
-    # profiling: 각 컴포넌트의 비율 (%) 계산 - fn_total 기준
-    fn_total = timing["fn_total_ms"]
+    # profiling: 각 컴포넌트의 비율 (%) 계산
+    total = timing["total_ms"]
+    tool_exec = timing["tool_exec_ms"]
     timing_pct = {}
-    if fn_total > 0:
-        # io + compute = fn_total 이므로, fn_total 기준으로 비율 계산
-        timing_pct = {
-            "io_pct": round(timing["io_ms"] / fn_total * 100, 2),
-            "compute_pct": round(timing["compute_ms"] / fn_total * 100, 2),
-        }
+    if total > 0:
+        # total 기준: cold_start + fn_total = total (대략)
+        timing_pct["cold_start_pct"] = round(timing["cold_start_ms"] / total * 100, 2)
+        timing_pct["deser_pct"] = round(timing["deser_ms"] / total * 100, 2)
+        timing_pct["tool_exec_pct"] = round(tool_exec / total * 100, 2)
+    if tool_exec > 0:
+        # tool_exec 기준: io + compute = tool_exec
+        timing_pct["io_pct"] = round(timing["io_ms"] / tool_exec * 100, 2)
+        timing_pct["compute_pct"] = round(timing["compute_ms"] / tool_exec * 100, 2)
     else:
-        timing_pct = {"io_pct": 0, "compute_pct": 0}
+        timing_pct["io_pct"] = 0
+        timing_pct["compute_pct"] = 0
 
     return ToolMeasurement(
         tool_name=tool_name,

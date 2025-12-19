@@ -5,7 +5,7 @@ analyze_results.py - Analyze WASM MCP profiling results
 Generates comparison tables and visualizations for:
 - Cold start vs Warm start comparison
 - Node-wise performance comparison
-- Time decomposition analysis (T_cold, T_io, T_serialize, T_compute)
+- Time decomposition analysis (cold_start, fn_total, io, compute)
 - Input size scaling analysis
 """
 
@@ -185,7 +185,7 @@ def compare_cold_warm(results: List[Dict]) -> Dict[str, Dict]:
 
 
 def analyze_time_decomposition(results: List[Dict]) -> Dict[str, Dict]:
-    """Analyze time decomposition (T_cold, T_io, T_serialize, T_compute)"""
+    """Analyze time decomposition (cold_start, deser, tool_exec, io, compute)"""
     decomposition = {}
 
     for r in results:
@@ -196,19 +196,27 @@ def analyze_time_decomposition(results: List[Dict]) -> Dict[str, Dict]:
         if "timing" in r:
             timing = r["timing"]
             total = timing.get("total_ms", 0)
+            cold_start = timing.get("cold_start_ms", 0)
+            deser = timing.get("deser_ms", 0)
+            tool_exec = timing.get("tool_exec_ms", 0)
+            io_ms = timing.get("io_ms", 0)
+            compute = timing.get("compute_ms", 0)
 
             if total > 0:
                 decomposition[key] = {
                     "total_ms": total,
-                    "cold_start_ms": timing.get("cold_start_ms", 0),
-                    "io_ms": timing.get("io_ms", 0),
-                    "serialize_ms": timing.get("serialize_ms", 0),
-                    "compute_ms": timing.get("compute_ms", 0),
-                    # Calculate percentages
-                    "cold_start_pct": (timing.get("cold_start_ms", 0) / total) * 100,
-                    "io_pct": (timing.get("io_ms", 0) / total) * 100,
-                    "serialize_pct": (timing.get("serialize_ms", 0) / total) * 100,
-                    "compute_pct": (timing.get("compute_ms", 0) / total) * 100,
+                    "cold_start_ms": cold_start,
+                    "deser_ms": deser,
+                    "tool_exec_ms": tool_exec,
+                    "io_ms": io_ms,
+                    "compute_ms": compute,
+                    # Percentages relative to total
+                    "cold_start_pct": (cold_start / total) * 100,
+                    "deser_pct": (deser / total) * 100,
+                    "tool_exec_pct": (tool_exec / total) * 100,
+                    # Percentages relative to tool_exec
+                    "io_pct": (io_ms / tool_exec) * 100 if tool_exec > 0 else 0,
+                    "compute_pct": (compute / tool_exec) * 100 if tool_exec > 0 else 0,
                 }
 
     return decomposition
@@ -299,24 +307,34 @@ def print_comparison_table(comparison: Dict[str, Dict]):
 
 def print_decomposition_table(decomposition: Dict[str, Dict]):
     """Print time decomposition table"""
-    print(f"\n{'='*90}")
+    print(f"\n{'='*120}")
     print("Execution Time Decomposition")
-    print(f"{'='*90}")
+    print("  cold_start: WASM loading time (measured separately, not part of fn_total)")
+    print("  fn_total = deser + tool_exec")
+    print("  tool_exec = io + compute")
+    print(f"{'='*120}")
 
     if not decomposition:
         print("No decomposition data available (internal timing not captured)")
         return
 
-    print(f"{'Tool:Size':<25} {'Total':>10} {'Cold':>10} {'I/O':>10} {'Serialize':>12} {'Compute':>10}")
-    print(f"{'':<25} {'(ms)':>10} {'(ms/%)':>10} {'(ms/%)':>10} {'(ms/%)':>12} {'(ms/%)':>10}")
-    print("-" * 90)
+    print(f"{'Tool:Size':<25} {'Total':>8} {'ColdStart':>10} {'Deser':>12} {'ToolExec':>12} {'I/O':>12} {'Compute':>12}")
+    print(f"{'':<25} {'(ms)':>8} {'(ms)':>10} {'(ms/%)':>12} {'(ms/%)':>12} {'(ms/%)':>12} {'(ms/%)':>12}")
+    print("-" * 120)
 
     for key, values in sorted(decomposition.items()):
-        print(f"{key:<25} {values['total_ms']:>10.2f} "
-              f"{values['cold_start_ms']:>5.1f}/{values['cold_start_pct']:>3.0f}% "
-              f"{values['io_ms']:>5.1f}/{values['io_pct']:>3.0f}% "
-              f"{values['serialize_ms']:>6.1f}/{values['serialize_pct']:>3.0f}% "
-              f"{values['compute_ms']:>5.1f}/{values['compute_pct']:>3.0f}%")
+        # Get fn_total (deser + tool_exec)
+        fn_total = values['deser_ms'] + values['tool_exec_ms']
+        # Percentages relative to fn_total (not total, since cold_start is separate)
+        deser_pct = (values['deser_ms'] / fn_total * 100) if fn_total > 0 else 0
+        tool_exec_pct = (values['tool_exec_ms'] / fn_total * 100) if fn_total > 0 else 0
+
+        print(f"{key:<25} {values['total_ms']:>8.2f} "
+              f"{values['cold_start_ms']:>10.2f} "
+              f"{values['deser_ms']:>6.1f}/{deser_pct:>4.0f}% "
+              f"{values['tool_exec_ms']:>6.1f}/{tool_exec_pct:>4.0f}% "
+              f"{values['io_ms']:>6.1f}/{values['io_pct']:>4.0f}% "
+              f"{values['compute_ms']:>6.1f}/{values['compute_pct']:>4.0f}%")
 
 
 def export_to_csv(results: List[Dict], output_path: Path):
@@ -423,8 +441,8 @@ def plot_time_decomposition(results: List[Dict], tool_name: str, output_path: Op
     # Prepare data
     labels = []
     cold_start = []
+    deser_time = []
     io_time = []
-    serialize_time = []
     compute_time = []
 
     for r in filtered:
@@ -434,31 +452,32 @@ def plot_time_decomposition(results: List[Dict], tool_name: str, output_path: Op
         timing = r.get("timing", {})
         total = timing.get("total_ms", 1)  # Avoid division by zero
 
-        # Get component times, fill unknown with remainder
+        # Get component times (decomposition: cold_start + deser + io + compute)
         cs = timing.get("cold_start_ms", 0)
+        deser = timing.get("deser_ms", 0)
         io = timing.get("io_ms", 0)
-        ser = timing.get("serialize_ms", 0)
         comp = timing.get("compute_ms", 0)
 
         # If no internal timing, attribute all to "compute" (unknown)
-        if cs + io + ser + comp == 0:
+        if cs + deser + io + comp == 0:
             comp = total
 
         cold_start.append(cs)
+        deser_time.append(deser)
         io_time.append(io)
-        serialize_time.append(ser)
         compute_time.append(comp)
 
     # Create stacked bar chart
     fig, ax = plt.subplots(figsize=(12, 6))
 
     x = range(len(labels))
-    ax.bar(x, cold_start, label='Cold Start', color='#e74c3c')
-    ax.bar(x, io_time, bottom=cold_start, label='I/O', color='#3498db')
-    ax.bar(x, serialize_time, bottom=[a+b for a,b in zip(cold_start, io_time)],
-           label='Serialize', color='#f39c12')
-    ax.bar(x, compute_time, bottom=[a+b+c for a,b,c in zip(cold_start, io_time, serialize_time)],
-           label='Compute', color='#2ecc71')
+    # Stack: cold_start -> deser -> io -> compute
+    ax.bar(x, cold_start, label='Cold Start (WASM load)', color='#e74c3c')
+    ax.bar(x, deser_time, bottom=cold_start, label='Deserialization', color='#f39c12')
+    bottom_io = [a+b for a,b in zip(cold_start, deser_time)]
+    ax.bar(x, io_time, bottom=bottom_io, label='I/O', color='#3498db')
+    bottom_comp = [a+b for a,b in zip(bottom_io, io_time)]
+    ax.bar(x, compute_time, bottom=bottom_comp, label='Compute', color='#2ecc71')
 
     ax.set_xlabel("Node:Size")
     ax.set_ylabel("Time (ms)")
