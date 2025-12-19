@@ -213,8 +213,15 @@ def measure_http_cold_start(
 
         # Wait for server to start (measure startup time)
         if not wait_for_server(port, timeout=10.0):
-            print(f"    Server failed to start on port {port}", file=sys.stderr)
+            # Capture stderr for debugging
             proc.terminate()
+            try:
+                _, stderr = proc.communicate(timeout=2)
+                print(f"    Server failed to start on port {port}", file=sys.stderr)
+                if stderr:
+                    print(f"    wasmtime stderr: {stderr.decode()[:500]}", file=sys.stderr)
+            except:
+                print(f"    Server failed to start on port {port}", file=sys.stderr)
             return TimingResult(run_id=0, total_ms=-1)
 
         server_startup_ms = (time.perf_counter() - total_start) * 1000
