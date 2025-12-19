@@ -1023,6 +1023,7 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
             "input_size_label": m.input_size_label,
             "runs": m.runs,
             "timing_ms": {
+                "total": round(m.timing["total_ms"], 3),
                 "cold_start": round(m.timing["cold_start_ms"], 3),
                 "json_parse": round(m.timing["json_parse_ms"], 3),
                 "tool_exec": round(m.timing["tool_exec_ms"], 3),
