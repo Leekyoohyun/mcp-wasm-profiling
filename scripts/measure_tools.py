@@ -366,6 +366,11 @@ def measure_cold_start(
         tool_exec_ms = None
         io_ms = None
         wasm_total_ms = None
+
+        # DEBUG: stderr 원본 출력
+        if os.environ.get("DEBUG") and result.stderr:
+            print(f"\n    [DEBUG] stderr:\n{result.stderr}", file=sys.stderr)
+
         if result.stderr:
             for line in result.stderr.strip().split('\n'):
                 if line.startswith("---JSON_PARSE---"):
