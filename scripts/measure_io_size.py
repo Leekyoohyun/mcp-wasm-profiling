@@ -26,8 +26,8 @@ from typing import Dict, Any, List
 SCRIPT_DIR = Path(__file__).parent
 
 WASM_MCP_PATH_CANDIDATES = [
-    Path.home() / "EdgeAgent/wasm_mcp",
-    Path.home() / "DDPS/undergraduated/CCGrid-2026/EdgeAgent/EdgeAgent/wasm_mcp",
+    Path.home() / "EdgeAgent/wasm_mcp/target/wasm32-wasip2/release",
+    Path.home() / "DDPS/undergraduated/CCGrid-2026/EdgeAgent/EdgeAgent/wasm_mcp/target/wasm32-wasip2/release",
 ]
 
 WASM_PATH = None
@@ -40,6 +40,7 @@ TEST_DATA_DIR = SCRIPT_DIR.parent / "test_data"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"
 
 TOOL_CONFIGS = {
+    # filesystem
     "read_file": {"server": "filesystem", "test_sizes": ["10MB"]},
     "read_text_file": {"server": "filesystem", "test_sizes": ["10MB"]},
     "read_media_file": {"server": "filesystem", "test_sizes": ["default"]},
@@ -54,6 +55,7 @@ TOOL_CONFIGS = {
     "search_files": {"server": "filesystem", "test_sizes": ["default"]},
     "get_file_info": {"server": "filesystem", "test_sizes": ["default"]},
     "list_allowed_directories": {"server": "filesystem", "test_sizes": ["default"]},
+    # git
     "git_status": {"server": "git", "test_sizes": ["default"]},
     "git_log": {"server": "git", "test_sizes": ["default"]},
     "git_show": {"server": "git", "test_sizes": ["default"]},
@@ -66,40 +68,47 @@ TOOL_CONFIGS = {
     "git_reset": {"server": "git", "test_sizes": ["default"]},
     "git_create_branch": {"server": "git", "test_sizes": ["default"]},
     "git_checkout": {"server": "git", "test_sizes": ["default"]},
-    "get_image_info": {"server": "image", "test_sizes": ["default"]},
-    "resize_image": {"server": "image", "test_sizes": ["default"]},
-    "scan_directory": {"server": "image", "test_sizes": ["default"]},
-    "compute_image_hash": {"server": "image", "test_sizes": ["default"]},
-    "compare_hashes": {"server": "image", "test_sizes": ["default"]},
-    "batch_resize": {"server": "image", "test_sizes": ["default"]},
-    "aggregate_list": {"server": "aggregation", "test_sizes": ["default"]},
-    "merge_summaries": {"server": "aggregation", "test_sizes": ["default"]},
-    "combine_research_results": {"server": "aggregation", "test_sizes": ["default"]},
-    "deduplicate": {"server": "aggregation", "test_sizes": ["default"]},
-    "compute_trends": {"server": "aggregation", "test_sizes": ["default"]},
-    "parse_logs": {"server": "log", "test_sizes": ["1000lines"]},
-    "filter_entries": {"server": "log", "test_sizes": ["1000lines"]},
-    "compute_log_statistics": {"server": "log", "test_sizes": ["1000lines"]},
-    "search_entries": {"server": "log", "test_sizes": ["1000lines"]},
-    "extract_time_range": {"server": "log", "test_sizes": ["1000lines"]},
+    # image-resize
+    "get_image_info": {"server": "image-resize", "test_sizes": ["default"]},
+    "resize_image": {"server": "image-resize", "test_sizes": ["default"]},
+    "scan_directory": {"server": "image-resize", "test_sizes": ["default"]},
+    "compute_image_hash": {"server": "image-resize", "test_sizes": ["default"]},
+    "compare_hashes": {"server": "image-resize", "test_sizes": ["default"]},
+    "batch_resize": {"server": "image-resize", "test_sizes": ["default"]},
+    # data-aggregate
+    "aggregate_list": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "merge_summaries": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "combine_research_results": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "deduplicate": {"server": "data-aggregate", "test_sizes": ["default"]},
+    "compute_trends": {"server": "data-aggregate", "test_sizes": ["default"]},
+    # log-parser
+    "parse_logs": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "filter_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"]},
+    # time
     "get_current_time": {"server": "time", "test_sizes": ["default"]},
     "convert_time": {"server": "time", "test_sizes": ["default"]},
-    "sequentialthinking": {"server": "thinking", "test_sizes": ["default"]},
-    "summarize_text": {"server": "summarizer", "test_sizes": ["default"], "needs_http": True},
-    "summarize_documents": {"server": "summarizer", "test_sizes": ["default"], "needs_http": True},
-    "get_provider_info": {"server": "summarizer", "test_sizes": ["default"]},
+    # sequential-thinking
+    "sequentialthinking": {"server": "sequential-thinking", "test_sizes": ["default"]},
+    # summarize
+    "summarize_text": {"server": "summarize", "test_sizes": ["default"], "needs_http": True},
+    "summarize_documents": {"server": "summarize", "test_sizes": ["default"], "needs_http": True},
+    "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
+    # fetch
     "fetch": {"server": "fetch", "test_sizes": ["default"], "needs_http": True},
 }
 
 SERVER_WASM = {
     "filesystem": "mcp_server_filesystem.wasm",
     "git": "mcp_server_git.wasm",
-    "image": "mcp_server_image.wasm",
-    "aggregation": "mcp_server_aggregation.wasm",
-    "log": "mcp_server_log.wasm",
+    "image-resize": "mcp_server_image_resize.wasm",
+    "data-aggregate": "mcp_server_data_aggregate.wasm",
+    "log-parser": "mcp_server_log_parser.wasm",
     "time": "mcp_server_time.wasm",
-    "thinking": "mcp_server_sequential_thinking.wasm",
-    "summarizer": "mcp_server_summarizer.wasm",
+    "sequential-thinking": "mcp_server_sequential_thinking.wasm",
+    "summarize": "mcp_server_summarize.wasm",
     "fetch": "mcp_server_fetch.wasm",
 }
 
