@@ -185,7 +185,10 @@ def run_tool(wasm_path: Path, tool_name: str, payload: Dict[str, Any],
                                 text=True, timeout=120.0, env=env)
         exec_time = (time.perf_counter() - start) * 1000
         output_size = len(result.stdout.encode('utf-8'))
-        return input_size, output_size, exec_time, result.returncode == 0, None
+        if result.returncode != 0:
+            err_msg = result.stderr[:200] if result.stderr else f"returncode={result.returncode}"
+            return input_size, output_size, exec_time, False, err_msg
+        return input_size, output_size, exec_time, True, None
     except subprocess.TimeoutExpired:
         return input_size, 0, 120000, False, "Timeout"
     except Exception as e:
@@ -372,6 +375,10 @@ def main():
     print(f"WASM_PATH exists: {WASM_PATH.exists() if WASM_PATH else False}")
     for candidate in WASM_MCP_PATH_CANDIDATES:
         print(f"  Candidate: {candidate} -> exists: {candidate.exists()}")
+    print(f"TEST_DATA_DIR: {TEST_DATA_DIR}")
+    print(f"TEST_DATA_DIR exists: {TEST_DATA_DIR.exists()}")
+    print(f"  files/test_10MB.txt: {(TEST_DATA_DIR / 'files' / 'test_10MB.txt').exists()}")
+    print(f"  images/test.png: {(TEST_DATA_DIR / 'images' / 'test.png').exists()}")
     print("=" * 70)
 
     results = []
