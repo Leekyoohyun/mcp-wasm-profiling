@@ -368,9 +368,9 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
 
 def get_process_memory_mb(pid: int) -> float:
     """
-    Get memory usage for a process using psutil.
+    Get memory usage for a process and all its children using psutil.
 
-    Returns memory in MB.
+    Returns total memory in MB.
     """
     if not HAS_PSUTIL:
         print(f"    [WARNING] psutil not installed, cannot measure memory", file=sys.stderr)
@@ -378,8 +378,21 @@ def get_process_memory_mb(pid: int) -> float:
 
     try:
         proc = psutil.Process(pid)
-        mem_mb = proc.memory_info().rss / (1024 * 1024)
-        return mem_mb
+        # Get memory of main process
+        total_mem = proc.memory_info().rss
+
+        # Add memory of all child processes
+        try:
+            children = proc.children(recursive=True)
+            for child in children:
+                try:
+                    total_mem += child.memory_info().rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        return total_mem / (1024 * 1024)
     except psutil.NoSuchProcess:
         print(f"    [WARNING] Process {pid} no longer exists", file=sys.stderr)
         return 0.0
