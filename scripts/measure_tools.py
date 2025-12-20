@@ -368,17 +368,10 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
 
 def get_process_memory_mb(pid: int) -> float:
     """
-    Get memory usage for a process.
-    Tries cgroups first, falls back to psutil.
+    Get memory usage for a process using psutil.
 
     Returns memory in MB.
     """
-    # Try cgroups first
-    cgroup_bytes = get_cgroup_memory_bytes(pid)
-    if cgroup_bytes is not None:
-        return cgroup_bytes / (1024 * 1024)
-
-    # Fallback to psutil
     if HAS_PSUTIL:
         try:
             proc = psutil.Process(pid)
