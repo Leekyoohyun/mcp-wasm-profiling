@@ -95,7 +95,7 @@ TOOL_CONFIGS = {
     # summarize
     "summarize_text": {"server": "summarize", "test_sizes": ["default"], "needs_http": True},
     "summarize_documents": {"server": "summarize", "test_sizes": ["default"], "needs_http": True},
-    "get_provider_info": {"server": "summarize", "test_sizes": ["default"]},
+    "get_provider_info": {"server": "summarize", "test_sizes": ["default"], "needs_http": True},
     # fetch
     "fetch": {"server": "fetch", "test_sizes": ["default"], "needs_http": True},
 }
