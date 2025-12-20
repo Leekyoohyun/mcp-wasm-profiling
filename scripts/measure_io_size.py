@@ -389,15 +389,22 @@ def main():
             print(f"FAILED: {r.get('error')}")
 
     if results:
-        out = args.output or (RESULTS_DIR / f"io_sizes_{get_node_name()}.json")
-        save_results(results, out)
+        success_count = sum(1 for r in results if r.get("success"))
+        fail_count = len(results) - success_count
 
         print("\n" + "=" * 70)
-        print(f"{'Tool':<30} {'Input':>12} {'Output':>12} {'Time':>10}")
-        print("-" * 70)
-        for r in sorted(results, key=lambda x: x.get("output_size", 0), reverse=True):
-            if r.get("success"):
-                print(f"{r['tool_name']:<30} {r['input_size']:>12,} {r['output_size']:>12,} {r['execution_time_ms']:>10.0f}")
+        print(f"Results: {success_count}/{len(results)} succeeded, {fail_count} failed")
+        print("=" * 70)
+
+        if success_count > 0:
+            out = args.output or (RESULTS_DIR / f"io_sizes_{get_node_name()}.json")
+            save_results(results, out)
+
+            print(f"{'Tool':<30} {'Input':>12} {'Output':>12} {'Time':>10}")
+            print("-" * 70)
+            for r in sorted(results, key=lambda x: x.get("output_size", 0), reverse=True):
+                if r.get("success"):
+                    print(f"{r['tool_name']:<30} {r['input_size']:>12,} {r['output_size']:>12,} {r['execution_time_ms']:>10.0f}")
 
 
 if __name__ == "__main__":
