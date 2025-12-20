@@ -324,14 +324,16 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
             if len(parts) >= 3 and parts[0] == '0':
                 # cgroups v2
                 cgroup_path = parts[2]
-                memory_file = Path(f"/sys/fs/cgroup{cgroup_path}/memory.current")
-                if memory_file.exists():
-                    return int(memory_file.read_text().strip())
 
-                # Try peak memory
+                # Try peak memory FIRST (captures max usage during execution)
                 memory_peak = Path(f"/sys/fs/cgroup{cgroup_path}/memory.peak")
                 if memory_peak.exists():
                     return int(memory_peak.read_text().strip())
+
+                # Fallback to current memory
+                memory_file = Path(f"/sys/fs/cgroup{cgroup_path}/memory.current")
+                if memory_file.exists():
+                    return int(memory_file.read_text().strip())
 
         # cgroups v1 (legacy hierarchy)
         # Format: N:memory:/path/to/cgroup
@@ -339,6 +341,13 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
             parts = line.split(':')
             if len(parts) >= 3 and parts[1] == 'memory':
                 cgroup_path = parts[2]
+
+                # Try peak memory FIRST (max_usage_in_bytes)
+                memory_peak = Path(f"/sys/fs/cgroup/memory{cgroup_path}/memory.max_usage_in_bytes")
+                if memory_peak.exists():
+                    return int(memory_peak.read_text().strip())
+
+                # Fallback to current usage
                 memory_file = Path(f"/sys/fs/cgroup/memory{cgroup_path}/memory.usage_in_bytes")
                 if memory_file.exists():
                     return int(memory_file.read_text().strip())
