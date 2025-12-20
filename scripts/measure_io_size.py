@@ -346,6 +346,10 @@ def main():
     print("=" * 70)
     print("MCP Tool I/O Size Profiler")
     print(f"Node: {get_node_name()}")
+    print(f"WASM_PATH: {WASM_PATH}")
+    print(f"WASM_PATH exists: {WASM_PATH.exists() if WASM_PATH else False}")
+    for candidate in WASM_MCP_PATH_CANDIDATES:
+        print(f"  Candidate: {candidate} -> exists: {candidate.exists()}")
     print("=" * 70)
 
     results = []
