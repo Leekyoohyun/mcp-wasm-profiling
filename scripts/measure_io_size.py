@@ -205,7 +205,7 @@ def prepare_payload(tool_name: str, size_label: str) -> tuple:
         f = get_test_file_path(size_label)
         if f.exists(): payload = {"path": str(f)}
     elif tool_name == "read_media_file":
-        f = TEST_DATA_DIR / "images" / "test_image.png"
+        f = TEST_DATA_DIR / "images" / "test.png"
         if f.exists(): payload = {"path": str(f)}
     elif tool_name == "read_multiple_files":
         f = get_test_file_path("1KB")
@@ -253,10 +253,10 @@ def prepare_payload(tool_name: str, size_label: str) -> tuple:
     elif tool_name == "git_checkout":
         payload = {"repo_path": str(TEST_DATA_DIR / "git_repo"), "branch_name": "main"}
     elif tool_name in ["get_image_info", "compute_image_hash"]:
-        f = TEST_DATA_DIR / "images" / "test_image.png"
+        f = TEST_DATA_DIR / "images" / "test.png"
         if f.exists(): payload = {"path": str(f)}
     elif tool_name == "resize_image":
-        f = TEST_DATA_DIR / "images" / "test_image.png"
+        f = TEST_DATA_DIR / "images" / "test.png"
         if f.exists(): payload = {"path": str(f), "width": 100, "height": 100}
     elif tool_name == "scan_directory":
         payload = {"path": str(TEST_DATA_DIR / "images")}
@@ -314,11 +314,13 @@ def measure_tool(tool_name: str, size_label: str = "default") -> dict:
 
     wasm_file = WASM_PATH / SERVER_WASM.get(config["server"], "")
     if not wasm_file.exists():
-        return {"tool_name": tool_name, "error": f"WASM not found"}
+        return {"tool_name": tool_name, "error": f"WASM not found: {wasm_file}"}
 
     payload, allowed_dirs, needs_http = prepare_payload(tool_name, size_label)
     if payload is None:
-        return {"tool_name": tool_name, "error": "Payload failed"}
+        # 디버그: 왜 payload가 None인지 확인
+        img_path = TEST_DATA_DIR / "images" / "test.png"
+        return {"tool_name": tool_name, "error": f"Payload failed (test_image exists: {img_path.exists()}, path: {img_path})"}
 
     input_size, output_size, exec_time, success, error = run_tool(
         wasm_file, tool_name, payload, allowed_dirs, needs_http)
