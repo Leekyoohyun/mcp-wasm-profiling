@@ -372,14 +372,23 @@ def get_process_memory_mb(pid: int) -> float:
 
     Returns memory in MB.
     """
-    if HAS_PSUTIL:
-        try:
-            proc = psutil.Process(pid)
-            return proc.memory_info().rss / (1024 * 1024)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
+    if not HAS_PSUTIL:
+        print(f"    [WARNING] psutil not installed, cannot measure memory", file=sys.stderr)
+        return 0.0
 
-    return 0.0
+    try:
+        proc = psutil.Process(pid)
+        mem_mb = proc.memory_info().rss / (1024 * 1024)
+        return mem_mb
+    except psutil.NoSuchProcess:
+        print(f"    [WARNING] Process {pid} no longer exists", file=sys.stderr)
+        return 0.0
+    except psutil.AccessDenied:
+        print(f"    [WARNING] Access denied to process {pid}", file=sys.stderr)
+        return 0.0
+    except Exception as e:
+        print(f"    [WARNING] Error measuring memory: {e}", file=sys.stderr)
+        return 0.0
 
 def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
     """Create JSON-RPC messages for MCP tool call"""
