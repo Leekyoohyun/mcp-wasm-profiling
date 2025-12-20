@@ -301,6 +301,83 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+
+def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
+    """
+    Get memory usage from cgroups for a given PID.
+    Supports both cgroups v1 and v2.
+
+    Returns memory usage in bytes, or None if not available.
+    """
+    try:
+        # First, find the cgroup for this process
+        cgroup_file = Path(f"/proc/{pid}/cgroup")
+        if not cgroup_file.exists():
+            return None
+
+        cgroup_content = cgroup_file.read_text()
+
+        # cgroups v2 (unified hierarchy)
+        # Format: 0::/path/to/cgroup
+        for line in cgroup_content.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 3 and parts[0] == '0':
+                # cgroups v2
+                cgroup_path = parts[2]
+                memory_file = Path(f"/sys/fs/cgroup{cgroup_path}/memory.current")
+                if memory_file.exists():
+                    return int(memory_file.read_text().strip())
+
+                # Try peak memory
+                memory_peak = Path(f"/sys/fs/cgroup{cgroup_path}/memory.peak")
+                if memory_peak.exists():
+                    return int(memory_peak.read_text().strip())
+
+        # cgroups v1 (legacy hierarchy)
+        # Format: N:memory:/path/to/cgroup
+        for line in cgroup_content.strip().split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 3 and parts[1] == 'memory':
+                cgroup_path = parts[2]
+                memory_file = Path(f"/sys/fs/cgroup/memory{cgroup_path}/memory.usage_in_bytes")
+                if memory_file.exists():
+                    return int(memory_file.read_text().strip())
+
+        # Fallback: try reading from process's own cgroup (v2)
+        proc_cgroup = Path(f"/proc/{pid}/cgroup")
+        if proc_cgroup.exists():
+            # For cgroups v2, check if this is the root cgroup
+            memory_current = Path("/sys/fs/cgroup/memory.current")
+            if memory_current.exists():
+                return int(memory_current.read_text().strip())
+
+        return None
+    except (IOError, ValueError, PermissionError):
+        return None
+
+
+def get_process_memory_mb(pid: int) -> float:
+    """
+    Get memory usage for a process.
+    Tries cgroups first, falls back to psutil.
+
+    Returns memory in MB.
+    """
+    # Try cgroups first
+    cgroup_bytes = get_cgroup_memory_bytes(pid)
+    if cgroup_bytes is not None:
+        return cgroup_bytes / (1024 * 1024)
+
+    # Fallback to psutil
+    if HAS_PSUTIL:
+        try:
+            proc = psutil.Process(pid)
+            return proc.memory_info().rss / (1024 * 1024)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    return 0.0
+
 def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
     """Create JSON-RPC messages for MCP tool call"""
     init_request = json.dumps({
@@ -645,15 +722,10 @@ def measure_cold_start_http(
         if io_ms:
             internal_timing["io_ms"] = float(io_ms)
 
-        # Measure memory usage of wasmtime process
+        # Measure memory usage of wasmtime process (cgroups first, fallback to psutil)
         memory_mb = 0.0
-        if HAS_PSUTIL and server_proc:
-            try:
-                proc = psutil.Process(server_proc.pid)
-                memory_info = proc.memory_info()
-                memory_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+        if server_proc:
+            memory_mb = get_process_memory_mb(server_proc.pid)
 
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
