@@ -161,6 +161,17 @@ def run_tool(wasm_path: Path, tool_name: str, payload: Dict[str, Any],
     for d in (allowed_dirs or ["/tmp"]):
         dir_args.extend(["--dir", d])
 
+    # Load environment variables (including from ~/.env if exists)
+    env = os.environ.copy()
+    env_file = Path.home() / ".env"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    env[key] = value
+
     cmd = ["wasmtime", "run"]
     if needs_http:
         cmd.extend(["-S", "http"])
@@ -171,7 +182,7 @@ def run_tool(wasm_path: Path, tool_name: str, payload: Dict[str, Any],
     start = time.perf_counter()
     try:
         result = subprocess.run(cmd, input=json_input, capture_output=True,
-                                text=True, timeout=120.0, env=os.environ.copy())
+                                text=True, timeout=120.0, env=env)
         exec_time = (time.perf_counter() - start) * 1000
         output_size = len(result.stdout.encode('utf-8'))
         return input_size, output_size, exec_time, result.returncode == 0, None
