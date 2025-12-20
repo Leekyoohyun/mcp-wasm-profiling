@@ -683,11 +683,6 @@ def measure_cold_start_http(
         server_ready_time = time.perf_counter()
         startup_ms = (server_ready_time - start_time) * 1000
 
-        # Measure baseline memory (before tool execution)
-        baseline_memory_mb = 0.0
-        if server_proc:
-            baseline_memory_mb = get_process_memory_mb(server_proc.pid)
-
         # Create JSON-RPC tool call request
         tool_request = {
             "jsonrpc": "2.0",
@@ -736,18 +731,15 @@ def measure_cold_start_http(
         if io_ms:
             internal_timing["io_ms"] = float(io_ms)
 
-        # Measure memory usage after tool execution (differential)
+        # Measure peak memory usage (absolute value, wasmtime overhead will be subtracted later)
         memory_mb = 0.0
-        after_memory_mb = 0.0
         if server_proc:
-            after_memory_mb = get_process_memory_mb(server_proc.pid)
-            # Calculate differential memory (tool's actual memory usage)
-            memory_mb = max(0.0, after_memory_mb - baseline_memory_mb)
+            memory_mb = get_process_memory_mb(server_proc.pid)
 
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
             print(f"    [DEBUG] Startup: {startup_ms:.2f}ms, Request: {request_ms:.2f}ms")
-            print(f"    [DEBUG] Memory: baseline={baseline_memory_mb:.2f}MB, after={after_memory_mb:.2f}MB, diff={memory_mb:.2f}MB")
+            print(f"    [DEBUG] Memory: {memory_mb:.2f}MB")
             print(f"    [DEBUG] Timing Headers: {dict(response.headers)}")
 
         return TimingResult(
