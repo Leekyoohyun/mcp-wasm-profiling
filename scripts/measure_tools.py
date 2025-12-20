@@ -17,6 +17,7 @@ import shutil
 import socket
 import sys
 import time
+import threading
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -403,6 +404,44 @@ def get_process_memory_mb(pid: int) -> float:
         print(f"    [WARNING] Error measuring memory: {e}", file=sys.stderr)
         return 0.0
 
+
+class PeakMemoryMonitor:
+    """
+    Monitor peak memory usage by polling in a background thread.
+    """
+
+    def __init__(self, pid: int, interval_ms: int = 10):
+        self.pid = pid
+        self.interval = interval_ms / 1000.0  # Convert to seconds
+        self.peak_memory_mb = 0.0
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        """Start monitoring in background thread."""
+        self._running = True
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> float:
+        """Stop monitoring and return peak memory in MB."""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        return self.peak_memory_mb
+
+    def _monitor_loop(self):
+        """Continuously poll memory and track peak."""
+        while self._running:
+            try:
+                current_mb = get_process_memory_mb(self.pid)
+                if current_mb > self.peak_memory_mb:
+                    self.peak_memory_mb = current_mb
+            except Exception:
+                pass
+            time.sleep(self.interval)
+
+
 def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
     """Create JSON-RPC messages for MCP tool call"""
     init_request = json.dumps({
@@ -710,6 +749,12 @@ def measure_cold_start_http(
             }
         }
 
+        # Start peak memory monitor before HTTP request
+        memory_monitor = None
+        if server_proc:
+            memory_monitor = PeakMemoryMonitor(server_proc.pid, interval_ms=5)
+            memory_monitor.start()
+
         # Send HTTP request and measure
         request_start = time.perf_counter()
         response = requests.post(
@@ -719,6 +764,11 @@ def measure_cold_start_http(
             timeout=60.0
         )
         request_end = time.perf_counter()
+
+        # Stop memory monitor and get peak value
+        memory_mb = 0.0
+        if memory_monitor:
+            memory_mb = memory_monitor.stop()
 
         # Total time from process start to response received
         total_ms = (request_end - start_time) * 1000
@@ -746,11 +796,6 @@ def measure_cold_start_http(
         io_ms = response.headers.get("X-IO-Ms")
         if io_ms:
             internal_timing["io_ms"] = float(io_ms)
-
-        # Measure peak memory usage (absolute value, wasmtime overhead will be subtracted later)
-        memory_mb = 0.0
-        if server_proc:
-            memory_mb = get_process_memory_mb(server_proc.pid)
 
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
@@ -951,9 +996,6 @@ def process_results(
     internal_timings_avg = None
     if raw_internal_timings:
         internal_timings_avg = {}
-
-        # wasm_total_ms 파싱 (from ---WASM_TOTAL---)
-        wasm_total_values = [t.get("wasm_total_ms", 0) for t in raw_internal_timings]
 
         # tool_exec_ms 파싱 (from ---TOOL_EXEC---)
         tool_exec_values = [t.get("tool_exec_ms", 0) for t in raw_internal_timings]
@@ -1165,7 +1207,6 @@ async def run_tool_measurement(
     # git 테스트 전에 변경사항 생성 (diff가 실제로 발생하도록)
     if tool_name.startswith("git_"):
         test_file = git_repo_path / "test_changes.txt"
-        import random
         # 매번 다른 내용으로 파일 수정 (unstaged 변경사항 생성)
         test_file.write_text(f"Test content modified at {time.time()}\n" + "x" * 10000)
 
