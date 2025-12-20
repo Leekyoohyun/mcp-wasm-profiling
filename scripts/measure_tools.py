@@ -544,6 +544,10 @@ def measure_cold_start_http(
     cmd.extend(["-S", "cli"])
     if needs_http:
         cmd.extend(["-S", "http"])
+    # Pass environment variables to WASM (required for API keys)
+    cmd.extend(["--env", "OPENAI_API_KEY"])
+    cmd.extend(["--env", "UPSTAGE_API_KEY"])
+    cmd.extend(["--env", "SUMMARIZE_PROVIDER"])
     cmd.extend(dir_args)
     cmd.append(str(wasm_path))
 
