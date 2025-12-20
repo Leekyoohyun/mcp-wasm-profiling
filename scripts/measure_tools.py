@@ -325,6 +325,10 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
                 # cgroups v2
                 cgroup_path = parts[2]
 
+                # Skip root cgroup - would read system-wide memory
+                if cgroup_path == "/" or cgroup_path == "":
+                    continue
+
                 # Try peak memory FIRST (captures max usage during execution)
                 memory_peak = Path(f"/sys/fs/cgroup{cgroup_path}/memory.peak")
                 if memory_peak.exists():
@@ -341,6 +345,10 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
             parts = line.split(':')
             if len(parts) >= 3 and parts[1] == 'memory':
                 cgroup_path = parts[2]
+
+                # Skip root cgroup - would read system-wide memory
+                if cgroup_path == "/" or cgroup_path == "":
+                    continue
 
                 # Try peak memory FIRST (max_usage_in_bytes)
                 memory_peak = Path(f"/sys/fs/cgroup/memory{cgroup_path}/memory.max_usage_in_bytes")
