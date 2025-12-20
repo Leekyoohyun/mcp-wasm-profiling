@@ -66,18 +66,38 @@ for path in WASM_PATH_CANDIDATES:
         WASM_PATH = path
         break
 
-# Server WASM mapping
-SERVER_WASM_MAP = {
-    'filesystem': 'mcp_server_filesystem.wasm',
-    'git': 'mcp_server_git.wasm',
-    'image-resize': 'mcp_server_image_resize.wasm',
-    'data-aggregate': 'mcp_server_data_aggregate.wasm',
-    'log-parser': 'mcp_server_log_parser.wasm',
-    'time': 'mcp_server_time.wasm',
-    'sequential-thinking': 'mcp_server_sequential_thinking.wasm',
-    'summarize': 'mcp_server_summarize.wasm',
-    'fetch': 'mcp_server_fetch.wasm',
+# Server WASM mapping (CLI mode - stdio)
+SERVER_WASM_MAP_CLI = {
+    'filesystem': 'mcp_server_filesystem_cli.wasm',
+    'git': 'mcp_server_git_cli.wasm',
+    'image-resize': 'mcp_server_image_resize_cli.wasm',
+    'data-aggregate': 'mcp_server_data_aggregate_cli.wasm',
+    'log-parser': 'mcp_server_log_parser_cli.wasm',
+    'time': 'mcp_server_time_cli.wasm',
+    'sequential-thinking': 'mcp_server_sequential_thinking_cli.wasm',
+    'summarize': 'mcp_server_summarize_cli.wasm',
+    'fetch': 'mcp_server_fetch_cli.wasm',
 }
+
+# Server WASM mapping (HTTP mode - wasmtime serve)
+SERVER_WASM_MAP_HTTP = {
+    'filesystem': 'mcp_server_filesystem_http.wasm',
+    'git': 'mcp_server_git_http.wasm',
+    'image-resize': 'mcp_server_image_resize_http.wasm',
+    'data-aggregate': 'mcp_server_data_aggregate_http.wasm',
+    'log-parser': 'mcp_server_log_parser_http.wasm',
+    'time': 'mcp_server_time_http.wasm',
+    'sequential-thinking': 'mcp_server_sequential_thinking_http.wasm',
+    'summarize': 'mcp_server_summarize_http.wasm',
+    'fetch': 'mcp_server_fetch_http.wasm',
+}
+
+# Default to CLI for backward compatibility
+SERVER_WASM_MAP = SERVER_WASM_MAP_CLI
+
+# HTTP server settings
+HTTP_SERVER_PORT = 8080
+HTTP_SERVER_HOST = "127.0.0.1"
 
 # Tool test configurations (single size per tool - 비율 측정용)
 # io_type: "disk" (filesystem/git), "network" (summarize/fetch), "none" (pure compute)
@@ -268,6 +288,8 @@ def generate_test_log_content(num_lines: int) -> str:
 # =============================================================================
 
 import subprocess
+import requests
+import signal
 
 def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
     """Create JSON-RPC messages for MCP tool call"""
@@ -458,6 +480,196 @@ def measure_cold_start_multiple(
     print(f"    Measuring ({runs})...", end="", flush=True)
     for i in range(runs):
         result = measure_cold_start(wasm_path, tool_name, payload, allowed_dirs, needs_http)
+        result.run_id = i + 1
+        results.append(result)
+        print(".", end="", flush=True)
+    print(" done")
+
+    return results
+
+
+# =============================================================================
+# HTTP Mode Cold Start Measurement (wasmtime serve)
+# =============================================================================
+
+def find_free_port() -> int:
+    """Find a free port to use for the HTTP server"""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+
+def measure_cold_start_http(
+    wasm_path: Path,
+    tool_name: str,
+    payload: Dict[str, Any],
+    allowed_dirs: list = None,
+    needs_http: bool = False
+) -> TimingResult:
+    """
+    Measure cold start using HTTP mode (wasmtime serve).
+
+    For each measurement:
+    1. Start wasmtime serve
+    2. Send HTTP request for tool call
+    3. Parse timing from response headers
+    4. Kill the server
+
+    This measures true cold start for HTTP/serverless deployment.
+    """
+    port = find_free_port()
+
+    # Build wasmtime serve command
+    if allowed_dirs is None:
+        allowed_dirs = ["/tmp"]
+
+    dir_args = []
+    for d in allowed_dirs:
+        dir_args.extend(["--dir", d])
+
+    # Load environment variables
+    env = os.environ.copy()
+    env_file = Path.home() / ".env"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    env[key] = value
+
+    cmd = ["wasmtime", "serve", "--addr", f"{HTTP_SERVER_HOST}:{port}"]
+    if needs_http:
+        cmd.extend(["-S", "http"])
+    cmd.extend(dir_args)
+    cmd.extend(["--env", "OPENAI_API_KEY", "--env", "UPSTAGE_API_KEY"])
+    cmd.append(str(wasm_path))
+
+    server_proc = None
+    try:
+        # Start the server
+        start_time = time.perf_counter()
+        server_proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        # Wait for server to be ready (poll the port)
+        url = f"http://{HTTP_SERVER_HOST}:{port}/"
+        max_wait = 10.0  # seconds
+        wait_start = time.perf_counter()
+        server_ready = False
+
+        while time.perf_counter() - wait_start < max_wait:
+            try:
+                # Try to connect
+                requests.get(url, timeout=0.5)
+                server_ready = True
+                break
+            except requests.exceptions.ConnectionError:
+                time.sleep(0.05)
+            except Exception:
+                time.sleep(0.05)
+
+        if not server_ready:
+            print(f"    Server failed to start within {max_wait}s", file=sys.stderr)
+            return TimingResult(run_id=0, total_ms=-1)
+
+        # Create JSON-RPC tool call request
+        tool_request = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "id": 1,
+            "params": {
+                "name": tool_name,
+                "arguments": payload
+            }
+        }
+
+        # Send HTTP request and measure
+        request_start = time.perf_counter()
+        response = requests.post(
+            url,
+            json=tool_request,
+            headers={"Content-Type": "application/json"},
+            timeout=60.0
+        )
+        request_end = time.perf_counter()
+
+        # Total time from process start to response received
+        total_ms = (request_end - start_time) * 1000
+
+        # Parse timing from response headers
+        internal_timing = {}
+
+        wasm_total = response.headers.get("X-WASM-Total-Ms")
+        if wasm_total:
+            internal_timing["wasm_total_ms"] = float(wasm_total)
+
+        json_parse = response.headers.get("X-JSON-Parse-Ms")
+        if json_parse:
+            internal_timing["json_parse_ms"] = float(json_parse)
+
+        tool_exec = response.headers.get("X-Tool-Exec-Ms")
+        if tool_exec:
+            internal_timing["tool_exec_ms"] = float(tool_exec)
+
+        io_ms = response.headers.get("X-IO-Ms")
+        if io_ms:
+            internal_timing["io_ms"] = float(io_ms)
+
+        if os.environ.get("DEBUG"):
+            print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
+            print(f"    [DEBUG] Timing Headers: {dict(response.headers)}")
+
+        return TimingResult(
+            run_id=0,
+            total_ms=total_ms,
+            internal_timing=internal_timing if internal_timing else None
+        )
+
+    except subprocess.TimeoutExpired:
+        print(f"    Timeout", file=sys.stderr)
+        return TimingResult(run_id=0, total_ms=-1)
+    except Exception as e:
+        print(f"    Error: {e}", file=sys.stderr)
+        return TimingResult(run_id=0, total_ms=-1)
+    finally:
+        # Clean up server process
+        if server_proc:
+            server_proc.terminate()
+            try:
+                server_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                server_proc.kill()
+
+
+def measure_cold_start_http_multiple(
+    wasm_path: Path,
+    tool_name: str,
+    payload: Dict[str, Any],
+    runs: int = DEFAULT_RUNS,
+    warmup_runs: int = DEFAULT_WARMUP_RUNS,
+    allowed_dirs: list = None,
+    needs_http: bool = False
+) -> List[TimingResult]:
+    """Run multiple HTTP cold start measurements"""
+    results = []
+
+    # Warmup runs
+    print(f"    Warmup ({warmup_runs})...", end="", flush=True)
+    for _ in range(warmup_runs):
+        measure_cold_start_http(wasm_path, tool_name, payload, allowed_dirs, needs_http)
+        print(".", end="", flush=True)
+    print(" done")
+
+    # Actual measurements
+    print(f"    Measuring ({runs})...", end="", flush=True)
+    for i in range(runs):
+        result = measure_cold_start_http(wasm_path, tool_name, payload, allowed_dirs, needs_http)
         result.run_id = i + 1
         results.append(result)
         print(".", end="", flush=True)
@@ -705,7 +917,8 @@ async def run_tool_measurement(
     input_size_label: str,
     mode: str = "cold",
     runs: int = DEFAULT_RUNS,
-    allowed_dirs: list = None
+    allowed_dirs: list = None,
+    transport: str = "cli"  # "cli" (stdio) or "http"
 ) -> Optional[ToolMeasurement]:
     """Run measurement for a single tool with specified input size"""
 
@@ -721,7 +934,13 @@ async def run_tool_measurement(
         print("WASM path not found", file=sys.stderr)
         return None
 
-    wasm_file = WASM_PATH / SERVER_WASM_MAP.get(server_name, "")
+    # Select WASM file based on transport mode
+    if transport == "http":
+        wasm_map = SERVER_WASM_MAP_HTTP
+    else:
+        wasm_map = SERVER_WASM_MAP_CLI
+
+    wasm_file = WASM_PATH / wasm_map.get(server_name, "")
     if not wasm_file.exists():
         print(f"WASM file not found: {wasm_file}", file=sys.stderr)
         return None
@@ -949,8 +1168,8 @@ async def run_tool_measurement(
     # Check if tool needs outbound HTTP
     needs_http = config.get("needs_http", False)
 
-    print(f"\n[{tool_name}] Input: {input_size_label} ({input_size} bytes), Mode: {mode}" +
-          (" (HTTP)" if needs_http else ""))
+    print(f"\n[{tool_name}] Input: {input_size_label} ({input_size} bytes), Mode: {mode}, Transport: {transport}" +
+          (" (needs_http)" if needs_http else ""))
 
     # profiling: 기본 디렉토리 설정 (test_data + /tmp)
     if allowed_dirs is None:
@@ -958,18 +1177,34 @@ async def run_tool_measurement(
 
     # Run measurements
     if mode == "cold":
-        # Cold start: subprocess (synchronous) - new process each time
-        results = measure_cold_start_multiple(
-            wasm_file, tool_name, payload,
-            runs=runs, allowed_dirs=allowed_dirs,
-            needs_http=needs_http
-        )
+        if transport == "http":
+            # HTTP mode: wasmtime serve
+            results = measure_cold_start_http_multiple(
+                wasm_file, tool_name, payload,
+                runs=runs, allowed_dirs=allowed_dirs,
+                needs_http=needs_http
+            )
+        else:
+            # CLI mode: subprocess (synchronous) - new process each time
+            results = measure_cold_start_multiple(
+                wasm_file, tool_name, payload,
+                runs=runs, allowed_dirs=allowed_dirs,
+                needs_http=needs_http
+            )
     else:  # warm
-        # Warm start: MCP client (async) - reuse session
-        results = await measure_warm_start_multiple(
-            server_name, wasm_file, tool_name, payload,
-            runs=runs, allowed_dirs=allowed_dirs
-        )
+        # Warm start: MCP client (async) - reuse session (CLI mode only)
+        if transport == "http":
+            print(f"    Warning: Warm start not supported in HTTP mode, using cold start", file=sys.stderr)
+            results = measure_cold_start_http_multiple(
+                wasm_file, tool_name, payload,
+                runs=runs, allowed_dirs=allowed_dirs,
+                needs_http=needs_http
+            )
+        else:
+            results = await measure_warm_start_multiple(
+                server_name, wasm_file, tool_name, payload,
+                runs=runs, allowed_dirs=allowed_dirs
+            )
 
     # Get io_type for this tool
     io_type = config.get("io_type", "none")
@@ -1055,8 +1290,11 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Measure all tools (cold start)
+  # Measure all tools (cold start, CLI mode)
   python measure_tools.py
+
+  # Measure with HTTP transport (wasmtime serve)
+  python measure_tools.py --transport http
 
   # Measure specific tool
   python measure_tools.py --tool read_file
@@ -1066,13 +1304,19 @@ Examples:
 
   # Measure with specific input size
   python measure_tools.py --tool read_file --size 1MB
+
+Transport modes:
+  cli   - Uses wasmtime run with stdio (JSON-RPC over stdin/stdout)
+  http  - Uses wasmtime serve (JSON-RPC over HTTP)
 """
     )
 
     parser.add_argument("--tool", "-t", type=str,
                         help="Specific tool to measure (default: all)")
+    parser.add_argument("--transport", "-T", choices=["cli", "http"],
+                        default="http", help="Transport mode: cli (stdio) or http (default: http)")
     parser.add_argument("--mode", "-m", choices=["cold", "warm", "both"],
-                        default="both", help="Measurement mode")
+                        default="cold", help="Measurement mode (default: cold)")
     parser.add_argument("--size", "-s", type=str,
                         help="Specific input size to test")
     parser.add_argument("--runs", "-r", type=int, default=DEFAULT_RUNS,
@@ -1097,6 +1341,7 @@ Examples:
     print("=" * 60)
     print(f"Node: {get_node_name()}")
     print(f"WASM Path: {WASM_PATH}")
+    print(f"Transport: {args.transport}")
     print()
 
     # Determine tools and sizes
@@ -1133,7 +1378,8 @@ Examples:
                     tool_name=tool_name,
                     input_size_label=size,
                     mode=mode,
-                    runs=args.runs
+                    runs=args.runs,
+                    transport=args.transport
                 )
                 if measurement:
                     all_measurements.append(measurement)
@@ -1142,16 +1388,17 @@ Examples:
     if all_measurements:
         node_name = get_node_name()
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        transport_suffix = f"_{args.transport}"
 
         if args.output:
             output_file = args.output
         else:
-            output_file = RESULTS_DIR / node_name / f"measurements_{timestamp_str}.json"
+            output_file = RESULTS_DIR / node_name / f"measurements{transport_suffix}_{timestamp_str}.json"
 
         save_results(all_measurements, output_file)
 
         # Save summary file
-        summary_file = RESULTS_DIR / node_name / f"summary_{timestamp_str}.json"
+        summary_file = RESULTS_DIR / node_name / f"summary{transport_suffix}_{timestamp_str}.json"
         save_summary(all_measurements, summary_file)
     else:
         print("\nNo measurements collected", file=sys.stderr)
