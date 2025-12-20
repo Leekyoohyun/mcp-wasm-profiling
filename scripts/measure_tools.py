@@ -875,20 +875,26 @@ def process_results(
             timing_std["json_parse_ms"] = statistics.stdev(json_parse_values) if len(json_parse_values) > 1 else 0.0
         internal_timings_avg["json_parse_ms"] = timing["json_parse_ms"]
 
-        # startup_ms (cold start) = total - json_parse - tool_exec
-        startup_per_run = []
-        for r in valid_results:
-            json_parse = 0.0
-            tool_exec = 0.0
-            if r.internal_timing:
-                json_parse = r.internal_timing.get("json_parse_ms", 0)
-                tool_exec = r.internal_timing.get("tool_exec_ms", 0)
-            cold_start = max(0.0, r.total_ms - json_parse - tool_exec)
-            startup_per_run.append(cold_start)
-
-        if startup_per_run:
-            timing["startup_ms"] = statistics.mean(startup_per_run)
-            timing_std["startup_ms"] = statistics.stdev(startup_per_run) if len(startup_per_run) > 1 else 0.0
+        # startup_ms: Python에서 측정한 값 사용 (wasmtime serve 시작 → 서버 준비 완료)
+        # Docker와 비교 가능하도록 프로세스 시작 시간을 직접 측정한 값 사용
+        startup_values = [t.get("startup_ms", 0) for t in raw_internal_timings if t.get("startup_ms", 0) > 0]
+        if startup_values:
+            timing["startup_ms"] = statistics.mean(startup_values)
+            timing_std["startup_ms"] = statistics.stdev(startup_values) if len(startup_values) > 1 else 0.0
+        else:
+            # fallback: 계산으로 추정 (total - json_parse - tool_exec)
+            startup_per_run = []
+            for r in valid_results:
+                json_parse = 0.0
+                tool_exec = 0.0
+                if r.internal_timing:
+                    json_parse = r.internal_timing.get("json_parse_ms", 0)
+                    tool_exec = r.internal_timing.get("tool_exec_ms", 0)
+                cold_start = max(0.0, r.total_ms - json_parse - tool_exec)
+                startup_per_run.append(cold_start)
+            if startup_per_run:
+                timing["startup_ms"] = statistics.mean(startup_per_run)
+                timing_std["startup_ms"] = statistics.stdev(startup_per_run) if len(startup_per_run) > 1 else 0.0
         internal_timings_avg["startup_ms"] = timing["startup_ms"]
     else:
         # internal timing이 없으면 전체 시간을 startup으로 간주
