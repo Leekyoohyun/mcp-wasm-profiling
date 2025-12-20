@@ -352,14 +352,7 @@ def get_cgroup_memory_bytes(pid: int) -> Optional[int]:
                 if memory_file.exists():
                     return int(memory_file.read_text().strip())
 
-        # Fallback: try reading from process's own cgroup (v2)
-        proc_cgroup = Path(f"/proc/{pid}/cgroup")
-        if proc_cgroup.exists():
-            # For cgroups v2, check if this is the root cgroup
-            memory_current = Path("/sys/fs/cgroup/memory.current")
-            if memory_current.exists():
-                return int(memory_current.read_text().strip())
-
+        # No cgroup memory info available, return None to use psutil fallback
         return None
     except (IOError, ValueError, PermissionError):
         return None
