@@ -181,6 +181,7 @@ class TimingResult:
     run_id: int
     total_ms: float
     internal_timing: Optional[Dict[str, float]] = None
+    memory_mb: float = 0.0  # Peak memory usage in MB
 
 
 @dataclass
@@ -200,6 +201,10 @@ class ToolMeasurement:
     timing_std: Dict[str, float]
     timing_pct: Dict[str, float]  # 각 컴포넌트의 비율 (%)
     measurements: List[float]
+
+    # Memory usage (MB)
+    memory_mb: float = 0.0
+    memory_std: float = 0.0
 
     # Internal timing if available (averaged)
     internal_timings: Optional[Dict[str, float]] = None
@@ -289,7 +294,12 @@ def generate_test_log_content(num_lines: int) -> str:
 
 import subprocess
 import requests
-import signal
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
     """Create JSON-RPC messages for MCP tool call"""
@@ -635,15 +645,27 @@ def measure_cold_start_http(
         if io_ms:
             internal_timing["io_ms"] = float(io_ms)
 
+        # Measure memory usage of wasmtime process
+        memory_mb = 0.0
+        if HAS_PSUTIL and server_proc:
+            try:
+                proc = psutil.Process(server_proc.pid)
+                memory_info = proc.memory_info()
+                memory_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
             print(f"    [DEBUG] Startup: {startup_ms:.2f}ms, Request: {request_ms:.2f}ms")
+            print(f"    [DEBUG] Memory: {memory_mb:.2f}MB")
             print(f"    [DEBUG] Timing Headers: {dict(response.headers)}")
 
         return TimingResult(
             run_id=0,
             total_ms=total_ms,
-            internal_timing=internal_timing if internal_timing else None
+            internal_timing=internal_timing if internal_timing else None,
+            memory_mb=memory_mb
         )
 
     except subprocess.TimeoutExpired:
@@ -905,6 +927,11 @@ def process_results(
         timing_pct["network_io_pct"] = 0
         timing_pct["compute_pct"] = 0
 
+    # Calculate memory statistics
+    memory_values = [r.memory_mb for r in valid_results if r.memory_mb > 0]
+    memory_mb = statistics.mean(memory_values) if memory_values else 0.0
+    memory_std = statistics.stdev(memory_values) if len(memory_values) > 1 else 0.0
+
     return ToolMeasurement(
         tool_name=tool_name,
         node=get_node_name(),
@@ -918,6 +945,8 @@ def process_results(
         timing_std=timing_std,
         timing_pct=timing_pct,
         measurements=total_times,
+        memory_mb=memory_mb,
+        memory_std=memory_std,
         internal_timings=internal_timings_avg
     )
 
