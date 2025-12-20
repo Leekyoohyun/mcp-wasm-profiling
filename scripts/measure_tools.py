@@ -540,10 +540,11 @@ def measure_cold_start_http(
                     env[key] = value
 
     cmd = ["wasmtime", "serve", "--addr", f"{HTTP_SERVER_HOST}:{port}"]
+    # Enable CLI interface for environment variables
+    cmd.extend(["-S", "cli"])
     if needs_http:
         cmd.extend(["-S", "http"])
     cmd.extend(dir_args)
-    cmd.extend(["--env", "OPENAI_API_KEY", "--env", "UPSTAGE_API_KEY"])
     cmd.append(str(wasm_path))
 
     server_proc = None
