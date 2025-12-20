@@ -25,8 +25,8 @@ from typing import Dict, Any, List
 
 SCRIPT_DIR = Path(__file__).parent
 WASM_PATH = Path(os.environ.get(
-    "WASM_PATH",
-    "~/EdgeAgent/wasm_mcp"
+    "~/EdgeAgent/wasm_mcp",
+    "/Users/leekyoohyun/DDPS/undergraduated/CCGrid-2026/EdgeAgent/EdgeAgent/wasm_mcp"
 ))
 TEST_DATA_DIR = SCRIPT_DIR.parent / "test_data"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"
