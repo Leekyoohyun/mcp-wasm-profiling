@@ -579,6 +579,10 @@ def measure_cold_start_http(
             print(f"    Server failed to start within {max_wait}s", file=sys.stderr)
             return TimingResult(run_id=0, total_ms=-1)
 
+        # Startup time = server ready time (WASM 로드 + 서버 초기화)
+        server_ready_time = time.perf_counter()
+        startup_ms = (server_ready_time - start_time) * 1000
+
         # Create JSON-RPC tool call request
         tool_request = {
             "jsonrpc": "2.0",
@@ -603,8 +607,13 @@ def measure_cold_start_http(
         # Total time from process start to response received
         total_ms = (request_end - start_time) * 1000
 
+        # Request processing time (JSON 파싱 + tool 실행)
+        request_ms = (request_end - request_start) * 1000
+
         # Parse timing from response headers
-        internal_timing = {}
+        internal_timing = {
+            "startup_ms": startup_ms,  # Python에서 측정한 정확한 startup
+        }
 
         wasm_total = response.headers.get("X-WASM-Total-Ms")
         if wasm_total:
@@ -624,6 +633,7 @@ def measure_cold_start_http(
 
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
+            print(f"    [DEBUG] Startup: {startup_ms:.2f}ms, Request: {request_ms:.2f}ms")
             print(f"    [DEBUG] Timing Headers: {dict(response.headers)}")
 
         return TimingResult(
@@ -847,35 +857,35 @@ def process_results(
         timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - total_io)
         internal_timings_avg["compute_ms"] = timing["compute_ms"]
 
-        # startup_ms = total - wasm_total (wasmtime 오버헤드 + 서버 생성)
-        # json_parse_ms = wasm_total - tool_exec (나머지 시간 = JSON 파싱 + init + 응답 직렬화 등)
-        if any(v > 0 for v in wasm_total_values):
-            avg_wasm_total = statistics.mean(wasm_total_values)
+        # 시간 분해 모델:
+        # Total = Cold Start + JSON Parsing + Tool Exec (I/O + Compute)
+        #
+        # - json_parse_ms: WASM 헤더에서 가져옴 (X-JSON-Parse-Ms)
+        # - tool_exec_ms: WASM 헤더에서 가져옴 (X-Tool-Exec-Ms)
+        # - cold_start_ms = total - json_parse - tool_exec
 
-            # 각 run별로 startup 계산해서 std 구하기
-            startup_per_run = []
-            json_parse_per_run = []
-            for i, r in enumerate(valid_results):
-                if r.internal_timing and r.internal_timing.get("wasm_total_ms", 0) > 0:
-                    wasm_total = r.internal_timing["wasm_total_ms"]
-                    tool_exec = r.internal_timing.get("tool_exec_ms", 0)
-                    startup_per_run.append(r.total_ms - wasm_total)
-                    json_parse_per_run.append(max(0.0, wasm_total - tool_exec))
+        # json_parse_ms: WASM 헤더에서 가져온 값 사용
+        json_parse_values = [t.get("json_parse_ms", 0) for t in raw_internal_timings if t.get("json_parse_ms", 0) > 0]
+        if json_parse_values:
+            timing["json_parse_ms"] = statistics.mean(json_parse_values)
+            timing_std["json_parse_ms"] = statistics.stdev(json_parse_values) if len(json_parse_values) > 1 else 0.0
+        internal_timings_avg["json_parse_ms"] = timing["json_parse_ms"]
 
-            if startup_per_run:
-                timing["startup_ms"] = statistics.mean(startup_per_run)
-                timing_std["startup_ms"] = statistics.stdev(startup_per_run) if len(startup_per_run) > 1 else 0.0
-            internal_timings_avg["startup_ms"] = timing["startup_ms"]
+        # startup_ms (cold start) = total - json_parse - tool_exec
+        startup_per_run = []
+        for r in valid_results:
+            json_parse = 0.0
+            tool_exec = 0.0
+            if r.internal_timing:
+                json_parse = r.internal_timing.get("json_parse_ms", 0)
+                tool_exec = r.internal_timing.get("tool_exec_ms", 0)
+            cold_start = max(0.0, r.total_ms - json_parse - tool_exec)
+            startup_per_run.append(cold_start)
 
-            if json_parse_per_run:
-                timing["json_parse_ms"] = statistics.mean(json_parse_per_run)
-                timing_std["json_parse_ms"] = statistics.stdev(json_parse_per_run) if len(json_parse_per_run) > 1 else 0.0
-            internal_timings_avg["json_parse_ms"] = timing["json_parse_ms"]
-        else:
-            # wasm_total이 없으면 total - tool_exec로 추정
-            timing["startup_ms"] = timing["total_ms"] - timing["tool_exec_ms"]
-            timing["json_parse_ms"] = 0.0
-            internal_timings_avg["startup_ms"] = timing["startup_ms"]
+        if startup_per_run:
+            timing["startup_ms"] = statistics.mean(startup_per_run)
+            timing_std["startup_ms"] = statistics.stdev(startup_per_run) if len(startup_per_run) > 1 else 0.0
+        internal_timings_avg["startup_ms"] = timing["startup_ms"]
     else:
         # internal timing이 없으면 전체 시간을 startup으로 간주
         timing["startup_ms"] = timing["total_ms"]
