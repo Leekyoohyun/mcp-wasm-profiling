@@ -1315,6 +1315,7 @@ def save_summary(measurements: List[ToolMeasurement], output_file: Path):
                 "compute": round(m.timing["compute_ms"], 3),
             },
             "timing_pct": m.timing_pct,
+            "memory_mb": round(m.memory_mb, 2),
         }
 
     with open(output_file, "w") as f:
