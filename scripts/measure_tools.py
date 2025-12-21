@@ -289,6 +289,123 @@ def generate_test_log_content(num_lines: int) -> str:
     return "\n".join(lines)
 
 
+def setup_git_test_repo() -> Path:
+    """
+    Create a proper git test repository for git tool testing.
+
+    Creates:
+    - 50+ source files (10KB each)
+    - 50+ commits with modifications
+    - 1 large binary file (1MB)
+    - Pack files (git gc)
+    - Multiple branches
+    - Unstaged and staged changes
+    - Untracked files
+
+    Returns the path to the git repository.
+    """
+    import subprocess
+    import base64
+    import os
+
+    git_repo = TEST_DATA_DIR / "git_repo"
+
+    print(f"Setting up git test repository at {git_repo}...")
+
+    # Remove existing repo and create fresh
+    if git_repo.exists():
+        shutil.rmtree(git_repo)
+    git_repo.mkdir(parents=True, exist_ok=True)
+
+    # Initialize git repo
+    subprocess.run(["git", "init"], cwd=git_repo, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_repo, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=git_repo, capture_output=True)
+
+    # Create initial README (100KB)
+    readme = git_repo / "README.md"
+    readme.write_bytes(base64.b64encode(os.urandom(75000)))  # ~100KB base64
+    subprocess.run(["git", "add", "README.md"], cwd=git_repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit with large README"],
+                   cwd=git_repo, capture_output=True)
+
+    # Create 50 source files (10KB each)
+    src_dir = git_repo / "src"
+    src_dir.mkdir(exist_ok=True)
+    print("  Creating 50 source files...")
+    for i in range(1, 51):
+        module_file = src_dir / f"module_{i}.py"
+        module_file.write_bytes(base64.b64encode(os.urandom(7500)))  # ~10KB base64
+    subprocess.run(["git", "add", "src/"], cwd=git_repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Add 50 source modules"], cwd=git_repo, capture_output=True)
+
+    # Create 50 commits with modifications
+    print("  Creating 50 commits with modifications...")
+    for i in range(1, 51):
+        file_num = (i % 50) + 1
+        module_file = src_dir / f"module_{file_num}.py"
+        # Append content to existing file
+        with open(module_file, "ab") as f:
+            f.write(f"\n# Modified in commit {i}\n".encode())
+            f.write(base64.b64encode(os.urandom(750)))  # ~1KB more
+        subprocess.run(["git", "add", f"src/module_{file_num}.py"], cwd=git_repo, capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"Commit {i}: modify module_{file_num}"],
+                       cwd=git_repo, capture_output=True)
+
+    # Add large binary file (1MB)
+    print("  Adding large binary file...")
+    assets_dir = git_repo / "assets"
+    assets_dir.mkdir(exist_ok=True)
+    binary_file = assets_dir / "large_binary.bin"
+    binary_file.write_bytes(os.urandom(1048576))  # 1MB
+    subprocess.run(["git", "add", "assets/"], cwd=git_repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Add large binary asset"], cwd=git_repo, capture_output=True)
+
+    # Create pack files
+    print("  Running git gc to create pack files...")
+    subprocess.run(["git", "gc", "--aggressive"], cwd=git_repo, capture_output=True)
+
+    # Create branches
+    subprocess.run(["git", "branch", "feature-branch"], cwd=git_repo, capture_output=True)
+    subprocess.run(["git", "branch", "bugfix-branch"], cwd=git_repo, capture_output=True)
+    subprocess.run(["git", "branch", "develop"], cwd=git_repo, capture_output=True)
+
+    # Create unstaged changes (for git_diff_unstaged)
+    module1 = src_dir / "module_1.py"
+    with open(module1, "ab") as f:
+        f.write(f"\n# Unstaged modification\n".encode())
+        f.write(base64.b64encode(os.urandom(3750)))  # ~5KB more
+
+    # Create staged changes (for git_diff_staged)
+    staged_file = git_repo / "staged.txt"
+    staged_file.write_bytes(b"staged content with more data\n" + base64.b64encode(os.urandom(7500)))
+    subprocess.run(["git", "add", "staged.txt"], cwd=git_repo, capture_output=True)
+
+    # Create untracked file (for git_status)
+    untracked_file = git_repo / "untracked.txt"
+    untracked_file.write_text("untracked file content\n")
+
+    # Verify setup
+    result = subprocess.run(["git", "log", "--oneline"], cwd=git_repo, capture_output=True, text=True)
+    commit_count = len(result.stdout.strip().split('\n'))
+
+    result = subprocess.run(["git", "branch", "-a"], cwd=git_repo, capture_output=True, text=True)
+    branch_count = len([b for b in result.stdout.strip().split('\n') if b.strip()])
+
+    # Calculate repo size
+    total_size = sum(f.stat().st_size for f in git_repo.rglob('*') if f.is_file())
+
+    print(f"  Git repository created:")
+    print(f"    - {commit_count} commits")
+    print(f"    - 50+ source files (10KB each)")
+    print(f"    - 1 large binary file (1MB)")
+    print(f"    - {branch_count} branches")
+    print(f"    - 1 unstaged change, 1 staged change, 1 untracked file")
+    print(f"    - Total size: {total_size / 1024 / 1024:.1f} MB")
+
+    return git_repo
+
+
 # =============================================================================
 # Cold Start Measurement (subprocess - new process each time)
 # =============================================================================
@@ -1527,6 +1644,18 @@ Transport modes:
     print()
 
     # Determine tools and sizes
+    if args.tool:
+        tools_to_run = [args.tool]
+    else:
+        tools_to_run = list(TOOL_CONFIGS.keys())
+
+    # Setup git repository if any git tools will be tested
+    git_tools = [t for t in tools_to_run if t.startswith("git_")]
+    if git_tools:
+        print("Git tools detected, setting up test repository...")
+        setup_git_test_repo()
+        print()
+
     if args.tool:
         tools = [args.tool]
     else:
