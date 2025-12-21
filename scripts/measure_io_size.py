@@ -7,17 +7,22 @@ Measures:
 - input_size: JSON-RPC request payload size (bytes)
 - output_size: JSON-RPC response size (bytes)
 - execution_time_ms: Total execution time
+
+Uses HTTP transport (wasmtime serve) for WASM execution.
 """
 
 import argparse
 import json
 import os
+import signal
 import socket
 import subprocess
 import time
+import urllib.request
+import urllib.error
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 # =============================================================================
 # Configuration
@@ -124,14 +129,152 @@ def get_node_name() -> str:
     return os.environ.get("NODE_NAME", hostname)
 
 
-def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
-    init_request = json.dumps({"jsonrpc": "2.0", "method": "initialize", "id": 1,
-        "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                   "clientInfo": {"name": "io-profiler", "version": "1.0.0"}}})
-    init_notification = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
-    tool_request = json.dumps({"jsonrpc": "2.0", "method": "tools/call", "id": 2,
-        "params": {"name": tool_name, "arguments": arguments}})
-    return f"{init_request}\n{init_notification}\n{tool_request}\n"
+def create_jsonrpc_request(tool_name: str, arguments: Dict[str, Any]) -> str:
+    """Create a single JSON-RPC tools/call request for HTTP transport."""
+    return json.dumps({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "id": 1,
+        "params": {"name": tool_name, "arguments": arguments}
+    })
+
+
+# Server port allocation
+BASE_PORT = 18100
+_current_port = BASE_PORT
+
+
+def get_next_port() -> int:
+    """Get next available port."""
+    global _current_port
+    port = _current_port
+    _current_port += 1
+    return port
+
+
+def find_free_port() -> int:
+    """Find a free port on the system."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
+
+
+class WasmServer:
+    """Manages a wasmtime serve process."""
+
+    def __init__(self, wasm_path: Path, port: int, allowed_dirs: List[str], needs_http: bool = False):
+        self.wasm_path = wasm_path
+        self.port = port
+        self.allowed_dirs = allowed_dirs
+        self.needs_http = needs_http
+        self.process: Optional[subprocess.Popen] = None
+        self.url = f"http://127.0.0.1:{port}"
+
+    def start(self, timeout: float = 10.0) -> bool:
+        """Start the wasmtime serve process."""
+        dir_args = []
+        for d in self.allowed_dirs:
+            dir_args.extend(["--dir", d])
+
+        cmd = [
+            "wasmtime", "serve",
+            "--addr", f"0.0.0.0:{self.port}",
+        ]
+        if self.needs_http:
+            cmd.extend(["-S", "http"])
+        cmd.extend(dir_args)
+        cmd.append(str(self.wasm_path))
+
+        # Load environment variables
+        env = os.environ.copy()
+        env_file = Path.home() / ".env"
+        if env_file.exists():
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, value = line.split("=", 1)
+                        env[key] = value
+
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+        except Exception as e:
+            return False
+
+        # Wait for server to be ready
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                req = urllib.request.Request(self.url, method='GET')
+                urllib.request.urlopen(req, timeout=1)
+                return True
+            except urllib.error.URLError:
+                if self.process.poll() is not None:
+                    # Process died
+                    stderr = self.process.stderr.read().decode() if self.process.stderr else ""
+                    return False
+                time.sleep(0.1)
+            except Exception:
+                time.sleep(0.1)
+
+        return True  # Assume ready after timeout
+
+    def stop(self):
+        """Stop the wasmtime serve process."""
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except:
+                try:
+                    self.process.kill()
+                except:
+                    pass
+            self.process = None
+
+    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> tuple:
+        """Call a tool via HTTP and return (input_size, output_size, exec_time_ms, success, error)."""
+        request_body = create_jsonrpc_request(tool_name, arguments)
+        input_size = len(request_body.encode('utf-8'))
+
+        try:
+            req = urllib.request.Request(
+                self.url,
+                data=request_body.encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+
+            start = time.perf_counter()
+            with urllib.request.urlopen(req, timeout=120) as response:
+                response_body = response.read()
+                exec_time = (time.perf_counter() - start) * 1000
+
+            output_size = len(response_body)
+
+            # Check for JSON-RPC error
+            try:
+                result = json.loads(response_body.decode('utf-8'))
+                if "error" in result:
+                    return input_size, output_size, exec_time, False, result["error"].get("message", "Unknown error")
+            except:
+                pass
+
+            return input_size, output_size, exec_time, True, None
+
+        except urllib.error.HTTPError as e:
+            return input_size, 0, 0, False, f"HTTP {e.code}: {e.reason}"
+        except urllib.error.URLError as e:
+            return input_size, 0, 0, False, f"URL Error: {e.reason}"
+        except Exception as e:
+            return input_size, 0, 0, False, str(e)
 
 
 def get_test_file_path(size_label: str) -> Path:
@@ -212,47 +355,8 @@ def generate_log_content(num_lines: int) -> str:
     return "\n".join(lines)
 
 
-def run_tool(wasm_path: Path, tool_name: str, payload: Dict[str, Any],
-             allowed_dirs: list = None, needs_http: bool = False) -> tuple:
-    json_input = create_jsonrpc_messages(tool_name, payload)
-    input_size = len(json_input.encode('utf-8'))
-
-    dir_args = []
-    for d in (allowed_dirs or ["/tmp"]):
-        dir_args.extend(["--dir", d])
-
-    # Load environment variables (including from ~/.env if exists)
-    env = os.environ.copy()
-    env_file = Path.home() / ".env"
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    env[key] = value
-
-    cmd = ["wasmtime", "run"]
-    if needs_http:
-        cmd.extend(["-S", "http"])
-    cmd.extend(dir_args)
-    cmd.extend(["--env", "OPENAI_API_KEY", "--env", "UPSTAGE_API_KEY"])
-    cmd.append(str(wasm_path))
-
-    start = time.perf_counter()
-    try:
-        result = subprocess.run(cmd, input=json_input, capture_output=True,
-                                text=True, timeout=120.0, env=env)
-        exec_time = (time.perf_counter() - start) * 1000
-        output_size = len(result.stdout.encode('utf-8'))
-        if result.returncode != 0:
-            err_msg = result.stderr[:200] if result.stderr else f"returncode={result.returncode}"
-            return input_size, output_size, exec_time, False, err_msg
-        return input_size, output_size, exec_time, True, None
-    except subprocess.TimeoutExpired:
-        return input_size, 0, 120000, False, "Timeout"
-    except Exception as e:
-        return input_size, 0, 0, False, str(e)
+# Server cache: reuse servers for same WASM file
+_server_cache: Dict[str, WasmServer] = {}
 
 
 def prepare_payload(tool_name: str, size_label: str) -> tuple:
@@ -371,23 +475,56 @@ def prepare_payload(tool_name: str, size_label: str) -> tuple:
     return payload, allowed_dirs, needs_http
 
 
+def get_or_create_server(wasm_file: Path, allowed_dirs: List[str], needs_http: bool) -> WasmServer:
+    """Get existing server or create a new one."""
+    cache_key = str(wasm_file)
+    if cache_key in _server_cache:
+        return _server_cache[cache_key]
+
+    port = find_free_port()
+    server = WasmServer(wasm_file, port, allowed_dirs, needs_http)
+    if server.start():
+        _server_cache[cache_key] = server
+        return server
+    return server
+
+
+def cleanup_servers():
+    """Stop all cached servers."""
+    for server in _server_cache.values():
+        server.stop()
+    _server_cache.clear()
+
+
 def measure_tool(tool_name: str, size_label: str = "default") -> dict:
+    """Measure tool I/O sizes using HTTP transport."""
     config = TOOL_CONFIGS.get(tool_name)
     if not config:
-        return {"tool_name": tool_name, "error": "Unknown tool"}
+        return {"tool_name": tool_name, "error": "Unknown tool", "success": False}
 
     wasm_file = WASM_PATH / SERVER_WASM.get(config["server"], "")
     if not wasm_file.exists():
-        return {"tool_name": tool_name, "error": f"WASM not found: {wasm_file}"}
+        return {"tool_name": tool_name, "error": f"WASM not found: {wasm_file}", "success": False}
 
     payload, allowed_dirs, needs_http = prepare_payload(tool_name, size_label)
     if payload is None:
-        # 디버그: 왜 payload가 None인지 확인
         img_path = TEST_DATA_DIR / "images" / "test.png"
-        return {"tool_name": tool_name, "error": f"Payload failed (test_image exists: {img_path.exists()}, path: {img_path})"}
+        return {"tool_name": tool_name, "error": f"Payload failed (test_image exists: {img_path.exists()}, path: {img_path})", "success": False}
 
-    input_size, output_size, exec_time, success, error = run_tool(
-        wasm_file, tool_name, payload, allowed_dirs, needs_http)
+    # Get or create server
+    server = get_or_create_server(wasm_file, allowed_dirs, needs_http)
+    if server.process is None or server.process.poll() is not None:
+        # Server failed to start or died
+        stderr = ""
+        if server.process and server.process.stderr:
+            try:
+                stderr = server.process.stderr.read().decode()[:200]
+            except:
+                pass
+        return {"tool_name": tool_name, "error": f"Server failed to start: {stderr}", "success": False}
+
+    # Call tool via HTTP
+    input_size, output_size, exec_time, success, error = server.call_tool(tool_name, payload)
 
     return {
         "tool_name": tool_name,
@@ -438,8 +575,9 @@ def main():
         print(f"  Candidate: {candidate} -> exists: {candidate.exists()}")
     print(f"TEST_DATA_DIR: {TEST_DATA_DIR}")
     print(f"TEST_DATA_DIR exists: {TEST_DATA_DIR.exists()}")
-    print(f"  files/test_10MB.txt: {(TEST_DATA_DIR / 'files' / 'test_10MB.txt').exists()}")
+    print(f"  files/test_500KB.txt: {(TEST_DATA_DIR / 'files' / 'test_500KB.txt').exists()}")
     print(f"  images/test.png: {(TEST_DATA_DIR / 'images' / 'test.png').exists()}")
+    print("Transport: HTTP (wasmtime serve)")
     print("=" * 70)
 
     results = []
@@ -476,6 +614,12 @@ def main():
                 if r.get("success"):
                     print(f"{r['tool_name']:<30} {r['input_size']:>12,} {r['output_size']:>12,} {r['execution_time_ms']:>10.0f}")
 
+    # Cleanup servers
+    cleanup_servers()
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        cleanup_servers()
