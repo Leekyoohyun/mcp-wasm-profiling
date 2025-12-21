@@ -919,6 +919,16 @@ def measure_cold_start_http(
             print(f"    [DEBUG] Startup: {startup_ms:.2f}ms, Request: {request_ms:.2f}ms")
             print(f"    [DEBUG] Memory: {memory_mb:.2f}MB")
             print(f"    [DEBUG] Timing Headers: {dict(response.headers)}")
+            # Show response body for debugging git tools
+            try:
+                resp_json = response.json()
+                if "result" in resp_json:
+                    result_preview = str(resp_json["result"])[:500]
+                    print(f"    [DEBUG] Response result: {result_preview}...")
+                elif "error" in resp_json:
+                    print(f"    [DEBUG] Response ERROR: {resp_json['error']}")
+            except:
+                print(f"    [DEBUG] Response body: {response.text[:500]}...")
 
         return TimingResult(
             run_id=0,
