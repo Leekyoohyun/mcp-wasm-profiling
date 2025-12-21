@@ -661,6 +661,10 @@ def measure_cold_start(
         if os.environ.get("DEBUG") and result.stderr:
             print(f"\n    [DEBUG] stderr:\n{result.stderr}", file=sys.stderr)
 
+        # Parse timing markers from stderr
+        disk_io_ms = None
+        network_io_ms = None
+
         if result.stderr:
             for line in result.stderr.strip().split('\n'):
                 if line.startswith("---JSON_PARSE---"):
@@ -673,7 +677,18 @@ def measure_cold_start(
                         tool_exec_ms = float(line[len("---TOOL_EXEC---"):])
                     except ValueError:
                         pass
+                elif line.startswith("---DISK_IO---"):
+                    try:
+                        disk_io_ms = float(line[len("---DISK_IO---"):])
+                    except ValueError:
+                        pass
+                elif line.startswith("---NETWORK_IO---"):
+                    try:
+                        network_io_ms = float(line[len("---NETWORK_IO---"):])
+                    except ValueError:
+                        pass
                 elif line.startswith("---IO---"):
+                    # Backward compatibility: old format
                     try:
                         io_ms = float(line[len("---IO---"):])
                     except ValueError:
@@ -690,7 +705,13 @@ def measure_cold_start(
             internal_timing["json_parse_ms"] = json_parse_ms
         if tool_exec_ms is not None:
             internal_timing["tool_exec_ms"] = tool_exec_ms
-        if io_ms is not None:
+        # New: separate disk_io and network_io
+        if disk_io_ms is not None:
+            internal_timing["disk_io_ms"] = disk_io_ms
+        if network_io_ms is not None:
+            internal_timing["network_io_ms"] = network_io_ms
+        # Backward compatibility: old io_ms format
+        if io_ms is not None and disk_io_ms is None and network_io_ms is None:
             internal_timing["io_ms"] = io_ms
         if wasm_total_ms is not None:
             internal_timing["wasm_total_ms"] = wasm_total_ms
@@ -910,8 +931,18 @@ def measure_cold_start_http(
         if tool_exec:
             internal_timing["tool_exec_ms"] = float(tool_exec)
 
+        # New: separate disk_io and network_io headers
+        disk_io = response.headers.get("X-Disk-IO-Ms")
+        if disk_io:
+            internal_timing["disk_io_ms"] = float(disk_io)
+
+        network_io = response.headers.get("X-Network-IO-Ms")
+        if network_io:
+            internal_timing["network_io_ms"] = float(network_io)
+
+        # Backward compatibility: old X-IO-Ms header
         io_ms = response.headers.get("X-IO-Ms")
-        if io_ms:
+        if io_ms and not disk_io and not network_io:
             internal_timing["io_ms"] = float(io_ms)
 
         if os.environ.get("DEBUG"):
@@ -1133,12 +1164,29 @@ def process_results(
             timing_std["tool_exec_ms"] = std_val
             internal_timings_avg["tool_exec_ms"] = avg_val
 
-        # io_ms 파싱 (from ---IO---) → io_type에 따라 disk_io 또는 network_io로 분류
+        # disk_io_ms 파싱 (from ---DISK_IO---)
+        disk_io_values = [t.get("disk_io_ms", 0) for t in raw_internal_timings]
+        if any(v > 0 for v in disk_io_values):
+            avg_val = statistics.mean(disk_io_values)
+            std_val = statistics.stdev(disk_io_values) if len(disk_io_values) > 1 else 0.0
+            timing["disk_io_ms"] = avg_val
+            timing_std["disk_io_ms"] = std_val
+            internal_timings_avg["disk_io_ms"] = avg_val
+
+        # network_io_ms 파싱 (from ---NETWORK_IO---)
+        network_io_values = [t.get("network_io_ms", 0) for t in raw_internal_timings]
+        if any(v > 0 for v in network_io_values):
+            avg_val = statistics.mean(network_io_values)
+            std_val = statistics.stdev(network_io_values) if len(network_io_values) > 1 else 0.0
+            timing["network_io_ms"] = avg_val
+            timing_std["network_io_ms"] = std_val
+            internal_timings_avg["network_io_ms"] = avg_val
+
+        # Backward compatibility: old io_ms format (use io_type to classify)
         io_values = [t.get("io_ms", 0) for t in raw_internal_timings]
-        if any(v > 0 for v in io_values):
+        if any(v > 0 for v in io_values) and timing["disk_io_ms"] == 0 and timing["network_io_ms"] == 0:
             avg_val = statistics.mean(io_values)
             std_val = statistics.stdev(io_values) if len(io_values) > 1 else 0.0
-
             if io_type == "disk":
                 timing["disk_io_ms"] = avg_val
                 timing_std["disk_io_ms"] = std_val
