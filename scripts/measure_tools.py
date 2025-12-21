@@ -1582,6 +1582,15 @@ Transport modes:
         # Save summary file
         summary_file = RESULTS_DIR / node_name / f"summary{transport_suffix}_{timestamp_str}.json"
         save_summary(all_measurements, summary_file)
+
+        # Print summary table (cold mode only)
+        cold_measurements = [m for m in all_measurements if m.mode == "cold"]
+        if cold_measurements:
+            print(f"\n{'Tool':<28} {'Total':>8} {'Startup':>8} {'Exec':>8} {'DiskIO':>8} {'NetIO':>8} {'Compute':>8} {'JSONParse':>9} {'Mem(MB)':>8}")
+            print("-" * 104)
+            for m in cold_measurements:
+                t = m.timing
+                print(f"{m.tool_name:<28} {t['total_ms']:>8.1f} {t['startup_ms']:>8.1f} {t['tool_exec_ms']:>8.1f} {t['disk_io_ms']:>8.1f} {t['network_io_ms']:>8.1f} {t['compute_ms']:>8.1f} {t['json_parse_ms']:>9.1f} {m.memory_mb:>8.1f}")
     else:
         print("\nNo measurements collected", file=sys.stderr)
 
