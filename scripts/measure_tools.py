@@ -317,8 +317,8 @@ def setup_git_test_repo() -> Path:
         shutil.rmtree(git_repo)
     git_repo.mkdir(parents=True, exist_ok=True)
 
-    # Initialize git repo
-    subprocess.run(["git", "init"], cwd=git_repo, capture_output=True, check=True)
+    # Initialize git repo with master branch (for compatibility)
+    subprocess.run(["git", "init", "-b", "master"], cwd=git_repo, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_repo, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=git_repo, capture_output=True)
 
