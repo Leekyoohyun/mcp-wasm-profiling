@@ -946,6 +946,11 @@ def measure_cold_start_http(
             }
         }
 
+        # Measure baseline memory before HTTP request
+        baseline_mb = 0.0
+        if server_proc:
+            baseline_mb = get_process_memory_mb(server_proc.pid)
+
         # Start peak memory monitor before HTTP request
         memory_monitor = None
         if server_proc:
@@ -963,9 +968,12 @@ def measure_cold_start_http(
         request_end = time.perf_counter()
 
         # Stop memory monitor and get peak value
-        memory_mb = 0.0
+        peak_mb = 0.0
         if memory_monitor:
-            memory_mb = memory_monitor.stop()
+            peak_mb = memory_monitor.stop()
+
+        # Calculate delta memory (memory used by tool execution)
+        memory_mb = max(0, peak_mb - baseline_mb)
 
         # Total time from process start to response received
         total_ms = (request_end - start_time) * 1000
@@ -1011,7 +1019,7 @@ def measure_cold_start_http(
 
         # Always print timing/memory debug info
         print(f"    [TIMING] Startup: {startup_ms:.1f}ms, Request: {request_ms:.1f}ms, Total: {total_ms:.1f}ms", flush=True)
-        print(f"    [MEMORY] Peak: {memory_mb:.2f}MB", flush=True)
+        print(f"    [MEMORY] baseline={baseline_mb:.2f}MB, peak={peak_mb:.2f}MB, delta={memory_mb:.2f}MB", flush=True)
 
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
