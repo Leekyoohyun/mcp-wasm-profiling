@@ -134,12 +134,12 @@ TOOL_CONFIGS = {
     "git_checkout": {"server": "git", "test_sizes": ["default"], "io_type": "disk"},
 
     # ===== image-resize (6 tools) - disk I/O =====
-    "get_image_info": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
-    "resize_image": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "get_image_info": {"server": "image-resize", "test_sizes": ["10MB"], "io_type": "disk"},
+    "resize_image": {"server": "image-resize", "test_sizes": ["10MB"], "io_type": "disk"},
     "scan_directory": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
-    "compute_image_hash": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "compute_image_hash": {"server": "image-resize", "test_sizes": ["10MB"], "io_type": "disk"},
     "compare_hashes": {"server": "image-resize", "test_sizes": ["default"], "io_type": "none"},
-    "batch_resize": {"server": "image-resize", "test_sizes": ["default"], "io_type": "disk"},
+    "batch_resize": {"server": "image-resize", "test_sizes": ["10MB"], "io_type": "disk"},
 
     # ===== data-aggregate (5 tools) - pure compute =====
     "aggregate_list": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
@@ -281,24 +281,41 @@ def get_test_directory_path(size_label: str) -> Path:
     return TEST_DATA_DIR / "directories" / size_label
 
 
-def get_test_image_path() -> Path:
-    """Get test image path, create small PNG if missing or too large (>10KB)"""
+def get_test_image_path(size_label: str = "default") -> Path:
+    """Get test image path, create PNG of specified size.
+
+    Args:
+        size_label: "default" (small ~500B), "1MB", "10MB"
+    """
     images_dir = TEST_DATA_DIR / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    image_path = images_dir / "test.png"
-    # Recreate if missing or too large (we want small ~500 byte PNG)
+    # Determine target size and dimensions
+    if size_label == "10MB":
+        image_path = images_dir / "test_10mb.png"
+        target_size = 10 * 1024 * 1024  # 10MB
+        width, height = 2000, 2000  # Large image for 10MB
+    elif size_label == "1MB":
+        image_path = images_dir / "test_1mb.png"
+        target_size = 1 * 1024 * 1024  # 1MB
+        width, height = 800, 800
+    else:
+        image_path = images_dir / "test.png"
+        target_size = 500  # ~500 bytes
+        width, height = 100, 100
+
+    # Check if we need to create/recreate the file
     needs_create = not image_path.exists()
-    if image_path.exists() and image_path.stat().st_size > 10240:  # > 10KB
-        needs_create = True
-        print(f"  Recreating test image (too large): {image_path}")
+    if image_path.exists():
+        current_size = image_path.stat().st_size
+        # Recreate if size differs by more than 10%
+        if abs(current_size - target_size) > target_size * 0.1:
+            needs_create = True
+            print(f"  Recreating test image (wrong size {current_size} vs {target_size}): {image_path}")
 
     if needs_create:
-        # Create a small 100x100 PNG (~500 bytes)
         import struct
         import zlib
-
-        width, height = 100, 100
 
         def png_chunk(chunk_type, data):
             chunk_len = struct.pack('>I', len(data))
@@ -309,15 +326,27 @@ def get_test_image_path() -> Path:
         ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
         png_data += png_chunk(b'IHDR', ihdr_data)
 
-        raw_data = b''
-        for _ in range(height):
-            raw_data += b'\x00' + b'\x80\x80\x80' * width
-        compressed = zlib.compress(raw_data, 9)
+        # For larger images, use random data to prevent compression
+        if size_label in ["1MB", "10MB"]:
+            import os
+            # Use random data to achieve target size (PNG compresses well, so use more raw data)
+            # RGB image: 3 bytes per pixel + 1 filter byte per row
+            raw_data = b''
+            for _ in range(height):
+                raw_data += b'\x00' + os.urandom(width * 3)  # Random RGB data
+            compressed = zlib.compress(raw_data, 0)  # No compression for larger output
+        else:
+            raw_data = b''
+            for _ in range(height):
+                raw_data += b'\x00' + b'\x80\x80\x80' * width
+            compressed = zlib.compress(raw_data, 9)
+
         png_data += png_chunk(b'IDAT', compressed)
         png_data += png_chunk(b'IEND', b'')
 
         image_path.write_bytes(png_data)
-        print(f"  Created test image: {image_path} ({len(png_data)} bytes)")
+        actual_size = len(png_data)
+        print(f"  Created test image: {image_path} ({actual_size:,} bytes, {actual_size/1024/1024:.2f}MB)")
 
     return image_path
 
@@ -1491,7 +1520,7 @@ async def run_tool_measurement(
 
     # ===== image-resize tools =====
     if tool_name in ["get_image_info", "compute_image_hash", "resize_image"]:
-        img_path = get_test_image_path()
+        img_path = get_test_image_path(input_size_label)
         if tool_name == "resize_image":
             payload = {"image_path": str(img_path), "width": 100, "height": 100}
         else:
@@ -1508,7 +1537,7 @@ async def run_tool_measurement(
             "threshold": 5
         }
     elif tool_name == "batch_resize":
-        img_path = get_test_image_path()
+        img_path = get_test_image_path(input_size_label)
         payload = {"image_paths": [str(img_path)], "max_size": 100}
 
     # ===== data-aggregate tools (100,000개 아이템 → ~5MB) =====
