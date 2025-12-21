@@ -41,11 +41,11 @@ RESULTS_DIR = SCRIPT_DIR.parent / "results"
 
 TOOL_CONFIGS = {
     # filesystem
-    "read_file": {"server": "filesystem", "test_sizes": ["10MB"]},
-    "read_text_file": {"server": "filesystem", "test_sizes": ["10MB"]},
+    "read_file": {"server": "filesystem", "test_sizes": ["500KB"]},
+    "read_text_file": {"server": "filesystem", "test_sizes": ["500KB"]},
     "read_media_file": {"server": "filesystem", "test_sizes": ["default"]},
     "read_multiple_files": {"server": "filesystem", "test_sizes": ["default"]},
-    "write_file": {"server": "filesystem", "test_sizes": ["10MB"]},
+    "write_file": {"server": "filesystem", "test_sizes": ["500KB"]},
     "edit_file": {"server": "filesystem", "test_sizes": ["default"]},
     "create_directory": {"server": "filesystem", "test_sizes": ["default"]},
     "list_directory": {"server": "filesystem", "test_sizes": ["100files"]},
@@ -135,11 +135,71 @@ def create_jsonrpc_messages(tool_name: str, arguments: Dict[str, Any]) -> str:
 
 
 def get_test_file_path(size_label: str) -> Path:
-    return TEST_DATA_DIR / "files" / f"test_{size_label}.txt"
+    """Get test file path for given size, create or recreate if wrong size"""
+    file_path = TEST_DATA_DIR / "files" / f"test_{size_label}.txt"
+
+    # Create directory if needed
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    size_map = {"1KB": 1024, "10KB": 10240, "100KB": 102400, "500KB": 512000, "1MB": 1048576, "10MB": 10485760}
+    size_bytes = size_map.get(size_label, 1024)
+
+    # Create file if missing or wrong size
+    needs_create = not file_path.exists()
+    if file_path.exists() and file_path.stat().st_size != size_bytes:
+        needs_create = True
+        print(f"  Recreating test file (wrong size): {file_path}")
+
+    if needs_create:
+        file_path.write_text("x" * size_bytes)
+        print(f"  Created test file: {file_path} ({size_label}, {size_bytes} bytes)")
+
+    return file_path
 
 
 def get_test_directory_path(size_label: str) -> Path:
     return TEST_DATA_DIR / "directories" / size_label
+
+
+def get_test_image_path() -> Path:
+    """Get test image path, create small PNG if missing or too large (>10KB)"""
+    images_dir = TEST_DATA_DIR / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    image_path = images_dir / "test.png"
+    # Recreate if missing or too large (we want small ~500 byte PNG)
+    needs_create = not image_path.exists()
+    if image_path.exists() and image_path.stat().st_size > 10240:  # > 10KB
+        needs_create = True
+        print(f"  Recreating test image (too large): {image_path}")
+
+    if needs_create:
+        # Create a small 100x100 PNG (~500 bytes)
+        import struct
+        import zlib
+
+        width, height = 100, 100
+
+        def png_chunk(chunk_type, data):
+            chunk_len = struct.pack('>I', len(data))
+            chunk_crc = struct.pack('>I', zlib.crc32(chunk_type + data) & 0xffffffff)
+            return chunk_len + chunk_type + data + chunk_crc
+
+        png_data = b'\x89PNG\r\n\x1a\n'
+        ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+        png_data += png_chunk(b'IHDR', ihdr_data)
+
+        raw_data = b''
+        for _ in range(height):
+            raw_data += b'\x00' + b'\x80\x80\x80' * width
+        compressed = zlib.compress(raw_data, 9)
+        png_data += png_chunk(b'IDAT', compressed)
+        png_data += png_chunk(b'IEND', b'')
+
+        image_path.write_bytes(png_data)
+        print(f"  Created test image: {image_path} ({len(png_data)} bytes)")
+
+    return image_path
 
 
 def generate_log_content(num_lines: int) -> str:
@@ -208,13 +268,13 @@ def prepare_payload(tool_name: str, size_label: str) -> tuple:
         f = get_test_file_path(size_label)
         if f.exists(): payload = {"path": str(f)}
     elif tool_name == "read_media_file":
-        f = TEST_DATA_DIR / "images" / "test.png"
-        if f.exists(): payload = {"path": str(f)}
+        f = get_test_image_path()
+        payload = {"path": str(f)}
     elif tool_name == "read_multiple_files":
         f = get_test_file_path("1KB")
         if f.exists(): payload = {"paths": [str(f)]}
     elif tool_name == "write_file":
-        sz = {"1KB": 1024, "10KB": 10240, "100KB": 102400, "1MB": 1048576, "10MB": 10485760}.get(size_label, 1024)
+        sz = {"1KB": 1024, "10KB": 10240, "100KB": 102400, "500KB": 512000, "1MB": 1048576, "10MB": 10485760}.get(size_label, 1024)
         payload = {"path": f"/tmp/io_test_{size_label}.txt", "content": "x" * sz}
     elif tool_name == "edit_file":
         f = get_test_file_path("1KB")
@@ -256,12 +316,13 @@ def prepare_payload(tool_name: str, size_label: str) -> tuple:
     elif tool_name == "git_checkout":
         payload = {"repo_path": str(TEST_DATA_DIR / "git_repo"), "branch_name": "main"}
     elif tool_name in ["get_image_info", "compute_image_hash"]:
-        f = TEST_DATA_DIR / "images" / "test.png"
-        if f.exists(): payload = {"path": str(f)}
+        f = get_test_image_path()
+        payload = {"path": str(f)}
     elif tool_name == "resize_image":
-        f = TEST_DATA_DIR / "images" / "test.png"
-        if f.exists(): payload = {"path": str(f), "width": 100, "height": 100}
+        f = get_test_image_path()
+        payload = {"path": str(f), "width": 100, "height": 100}
     elif tool_name == "scan_directory":
+        get_test_image_path()  # Ensure image exists
         payload = {"path": str(TEST_DATA_DIR / "images")}
     elif tool_name == "compare_hashes":
         payload = {"hash1": "abc123", "hash2": "abc123"}
