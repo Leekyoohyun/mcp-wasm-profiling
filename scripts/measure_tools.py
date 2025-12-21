@@ -1220,15 +1220,15 @@ async def run_tool_measurement(
     if tool_name == "git_status":
         payload = {"repo_path": git_repo}
     elif tool_name == "git_log":
-        payload = {"repo_path": git_repo, "max_count": 5}
+        payload = {"repo_path": git_repo, "max_count": 50}  # 50개 커밋 읽기
     elif tool_name == "git_show":
         payload = {"repo_path": git_repo, "revision": "HEAD"}
     elif tool_name == "git_branch":
-        payload = {"repo_path": git_repo, "branch_type": "local"}
+        payload = {"repo_path": git_repo, "branch_type": "all"}  # 모든 브랜치
     elif tool_name in ["git_diff_unstaged", "git_diff_staged", "git_reset"]:
         payload = {"repo_path": git_repo}
     elif tool_name == "git_diff":
-        payload = {"repo_path": git_repo, "target": "HEAD~1"}
+        payload = {"repo_path": git_repo, "target": "HEAD~10"}  # 10개 커밋 diff
     elif tool_name == "git_commit":
         payload = {"repo_path": git_repo, "message": "test commit"}
     elif tool_name == "git_add":
