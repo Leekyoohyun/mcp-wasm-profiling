@@ -14,12 +14,10 @@ Uses HTTP transport (wasmtime serve) for WASM execution.
 import argparse
 import json
 import os
-import signal
 import socket
 import subprocess
 import time
-import urllib.request
-import urllib.error
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -105,16 +103,17 @@ TOOL_CONFIGS = {
     "fetch": {"server": "fetch", "test_sizes": ["default"], "needs_http": True},
 }
 
+# HTTP mode WASM files (wasmtime serve)
 SERVER_WASM = {
-    "filesystem": "mcp_server_filesystem.wasm",
-    "git": "mcp_server_git.wasm",
-    "image-resize": "mcp_server_image_resize.wasm",
-    "data-aggregate": "mcp_server_data_aggregate.wasm",
-    "log-parser": "mcp_server_log_parser.wasm",
-    "time": "mcp_server_time.wasm",
-    "sequential-thinking": "mcp_server_sequential_thinking.wasm",
-    "summarize": "mcp_server_summarize.wasm",
-    "fetch": "mcp_server_fetch.wasm",
+    "filesystem": "mcp_server_filesystem_http.wasm",
+    "git": "mcp_server_git_http.wasm",
+    "image-resize": "mcp_server_image_resize_http.wasm",
+    "data-aggregate": "mcp_server_data_aggregate_http.wasm",
+    "log-parser": "mcp_server_log_parser_http.wasm",
+    "time": "mcp_server_time_http.wasm",
+    "sequential-thinking": "mcp_server_sequential_thinking_http.wasm",
+    "summarize": "mcp_server_summarize_http.wasm",
+    "fetch": "mcp_server_fetch_http.wasm",
 }
 
 
@@ -162,7 +161,7 @@ def find_free_port() -> int:
 
 
 class WasmServer:
-    """Manages a wasmtime serve process."""
+    """Manages a wasmtime serve process (matches measure_tools.py approach)."""
 
     def __init__(self, wasm_path: Path, port: int, allowed_dirs: List[str], needs_http: bool = False):
         self.wasm_path = wasm_path
@@ -170,22 +169,15 @@ class WasmServer:
         self.allowed_dirs = allowed_dirs
         self.needs_http = needs_http
         self.process: Optional[subprocess.Popen] = None
-        self.url = f"http://127.0.0.1:{port}"
+        self.url = f"http://127.0.0.1:{port}/"
+        self._start_error = ""
 
     def start(self, timeout: float = 10.0) -> bool:
         """Start the wasmtime serve process."""
+        # Build dir args (simple format like measure_tools.py)
         dir_args = []
         for d in self.allowed_dirs:
             dir_args.extend(["--dir", d])
-
-        cmd = [
-            "wasmtime", "serve",
-            "--addr", f"0.0.0.0:{self.port}",
-        ]
-        if self.needs_http:
-            cmd.extend(["-S", "http"])
-        cmd.extend(dir_args)
-        cmd.append(str(self.wasm_path))
 
         # Load environment variables
         env = os.environ.copy()
@@ -198,6 +190,17 @@ class WasmServer:
                         key, value = line.split("=", 1)
                         env[key] = value
 
+        # Build command (matching measure_tools.py)
+        cmd = ["wasmtime", "serve", "--addr", f"127.0.0.1:{self.port}"]
+        cmd.extend(["-S", "cli"])  # Enable CLI interface for env vars
+        if self.needs_http:
+            cmd.extend(["-S", "http"])
+        cmd.extend(["--env", "OPENAI_API_KEY"])
+        cmd.extend(["--env", "UPSTAGE_API_KEY"])
+        cmd.extend(["--env", "SUMMARIZE_PROVIDER"])
+        cmd.extend(dir_args)
+        cmd.append(str(self.wasm_path))
+
         try:
             self.process = subprocess.Popen(
                 cmd,
@@ -206,37 +209,49 @@ class WasmServer:
                 env=env,
             )
         except Exception as e:
+            self._start_error = str(e)
             return False
 
-        # Wait for server to be ready
+        # Wait for server to be ready (poll the port)
         start_time = time.time()
         while time.time() - start_time < timeout:
-            try:
-                req = urllib.request.Request(self.url, method='GET')
-                urllib.request.urlopen(req, timeout=1)
-                return True
-            except urllib.error.URLError:
-                if self.process.poll() is not None:
-                    # Process died
-                    stderr = self.process.stderr.read().decode() if self.process.stderr else ""
-                    return False
-                time.sleep(0.1)
-            except Exception:
-                time.sleep(0.1)
+            # Check if process died
+            if self.process.poll() is not None:
+                try:
+                    stderr = self.process.stderr.read().decode()[:500]
+                except:
+                    stderr = ""
+                self._start_error = stderr or f"Process exited with code {self.process.returncode}"
+                return False
 
-        return True  # Assume ready after timeout
+            # Try to connect using requests
+            try:
+                requests.get(self.url, timeout=0.5)
+                return True
+            except requests.exceptions.ConnectionError:
+                time.sleep(0.05)
+            except Exception:
+                time.sleep(0.05)
+
+        # Check one more time if process is still alive
+        if self.process.poll() is None:
+            return True  # Process running, assume ready
+
+        try:
+            stderr = self.process.stderr.read().decode()[:500]
+        except:
+            stderr = ""
+        self._start_error = stderr or "Timeout waiting for server"
+        return False
 
     def stop(self):
         """Stop the wasmtime serve process."""
         if self.process:
+            self.process.terminate()
             try:
-                self.process.terminate()
-                self.process.wait(timeout=5)
-            except:
-                try:
-                    self.process.kill()
-                except:
-                    pass
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
             self.process = None
 
     def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> tuple:
@@ -245,23 +260,20 @@ class WasmServer:
         input_size = len(request_body.encode('utf-8'))
 
         try:
-            req = urllib.request.Request(
-                self.url,
-                data=request_body.encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
-                method='POST'
-            )
-
             start = time.perf_counter()
-            with urllib.request.urlopen(req, timeout=120) as response:
-                response_body = response.read()
-                exec_time = (time.perf_counter() - start) * 1000
+            response = requests.post(
+                self.url,
+                data=request_body,
+                headers={'Content-Type': 'application/json'},
+                timeout=120.0
+            )
+            exec_time = (time.perf_counter() - start) * 1000
 
-            output_size = len(response_body)
+            output_size = len(response.content)
 
             # Check for JSON-RPC error
             try:
-                result = json.loads(response_body.decode('utf-8'))
+                result = response.json()
                 if "error" in result:
                     return input_size, output_size, exec_time, False, result["error"].get("message", "Unknown error")
             except:
@@ -269,10 +281,10 @@ class WasmServer:
 
             return input_size, output_size, exec_time, True, None
 
-        except urllib.error.HTTPError as e:
-            return input_size, 0, 0, False, f"HTTP {e.code}: {e.reason}"
-        except urllib.error.URLError as e:
-            return input_size, 0, 0, False, f"URL Error: {e.reason}"
+        except requests.exceptions.HTTPError as e:
+            return input_size, 0, 0, False, f"HTTP Error: {e}"
+        except requests.exceptions.ConnectionError as e:
+            return input_size, 0, 0, False, f"Connection Error: {e}"
         except Exception as e:
             return input_size, 0, 0, False, str(e)
 
@@ -515,13 +527,8 @@ def measure_tool(tool_name: str, size_label: str = "default") -> dict:
     server = get_or_create_server(wasm_file, allowed_dirs, needs_http)
     if server.process is None or server.process.poll() is not None:
         # Server failed to start or died
-        stderr = ""
-        if server.process and server.process.stderr:
-            try:
-                stderr = server.process.stderr.read().decode()[:200]
-            except:
-                pass
-        return {"tool_name": tool_name, "error": f"Server failed to start: {stderr}", "success": False}
+        error_msg = getattr(server, '_start_error', '') or "Unknown error"
+        return {"tool_name": tool_name, "error": f"Server failed to start: {error_msg}", "success": False}
 
     # Call tool via HTTP
     input_size, output_size, exec_time, success, error = server.call_tool(tool_name, payload)
