@@ -940,6 +940,11 @@ def measure_cold_start_http(
         if network_io:
             internal_timing["network_io_ms"] = float(network_io)
 
+        # Compute time header
+        compute = response.headers.get("X-Compute-Ms")
+        if compute:
+            internal_timing["compute_ms"] = float(compute)
+
         # Backward compatibility: old X-IO-Ms header
         io_ms = response.headers.get("X-IO-Ms")
         if io_ms and not disk_io and not network_io:
@@ -1196,10 +1201,19 @@ def process_results(
                 timing_std["network_io_ms"] = std_val
                 internal_timings_avg["network_io_ms"] = avg_val
 
-        # compute_ms = tool_exec - (disk_io + network_io)
-        total_io = timing["disk_io_ms"] + timing["network_io_ms"]
-        timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - total_io)
-        internal_timings_avg["compute_ms"] = timing["compute_ms"]
+        # compute_ms: use from header if available, otherwise calculate
+        compute_values = [t.get("compute_ms", 0) for t in raw_internal_timings]
+        if any(v > 0 for v in compute_values):
+            avg_val = statistics.mean(compute_values)
+            std_val = statistics.stdev(compute_values) if len(compute_values) > 1 else 0.0
+            timing["compute_ms"] = avg_val
+            timing_std["compute_ms"] = std_val
+            internal_timings_avg["compute_ms"] = avg_val
+        else:
+            # Fallback: compute_ms = tool_exec - (disk_io + network_io)
+            total_io = timing["disk_io_ms"] + timing["network_io_ms"]
+            timing["compute_ms"] = max(0.0, timing["tool_exec_ms"] - total_io)
+            internal_timings_avg["compute_ms"] = timing["compute_ms"]
 
         # 시간 분해 모델:
         # total = startup + json_parse + tool_exec
