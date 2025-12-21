@@ -230,7 +230,7 @@ done
 # =============================================================================
 
 echo ""
-echo "=== Creating Test Git Repository ==="
+echo "=== Creating Test Git Repository (Large) ==="
 
 GIT_REPO_DIR="${TEST_DATA_DIR}/git_repo"
 
@@ -246,44 +246,54 @@ git init
 git config user.email "test@test.com"
 git config user.name "Test User"
 
-# 초기 파일 생성 및 커밋
-echo "line 1" > test.txt
-echo "# Test Repository" > README.md
-git add test.txt README.md
-git commit -m "Initial commit"
+# 초기 파일 생성 - 100KB README
+head -c 102400 /dev/urandom | base64 > README.md
+git add README.md
+git commit -m "Initial commit with large README"
 
-# 두 번째 커밋
-echo "line 2" >> test.txt
-echo "More content" >> README.md
-git add test.txt README.md
-git commit -m "Second commit"
+# 50개 파일 생성 (각 10KB)
+echo "Creating 50 source files..."
+mkdir -p src
+for i in $(seq 1 50); do
+    head -c 10240 /dev/urandom | base64 > "src/module_${i}.py"
+done
+git add src/
+git commit -m "Add 50 source modules"
 
-# 세 번째 커밋
-echo "line 3" >> test.txt
-echo "function hello() { return 'world'; }" > code.js
-git add test.txt code.js
-git commit -m "Third commit: add code.js"
+# 50개 추가 커밋 (파일 수정)
+echo "Creating 50 commits with modifications..."
+for i in $(seq 1 50); do
+    # 랜덤 파일 수정
+    file_num=$((($i % 50) + 1))
+    echo "# Modified in commit $i" >> "src/module_${file_num}.py"
+    head -c 1024 /dev/urandom | base64 >> "src/module_${file_num}.py"
+    git add "src/module_${file_num}.py"
+    git commit -m "Commit $i: modify module_${file_num}"
+done
 
-# 네 번째 커밋
-echo "line 4" >> test.txt
-echo "def main(): pass" > main.py
-git add test.txt main.py
-git commit -m "Fourth commit: add main.py"
+# 큰 바이너리 파일 추가 (1MB)
+echo "Adding large binary file..."
+mkdir -p assets
+head -c 1048576 /dev/urandom > assets/large_binary.bin
+git add assets/
+git commit -m "Add large binary asset"
 
-# 다섯 번째 커밋
-echo "line 5" >> test.txt
-git add test.txt
-git commit -m "Fifth commit"
+# Pack 파일 생성 (loose objects를 pack으로 변환)
+echo "Running git gc to create pack files..."
+git gc --aggressive
 
 # 브랜치 생성
 git branch feature-branch
 git branch bugfix-branch
+git branch develop
 
 # unstaged 변경사항 (git_diff_unstaged 테스트용)
-echo "line 6 - unstaged change" >> test.txt
+echo "# Unstaged modification" >> src/module_1.py
+head -c 5120 /dev/urandom | base64 >> src/module_1.py
 
 # staged 변경사항 (git_diff_staged 테스트용)
-echo "staged content" > staged.txt
+echo "staged content with more data" > staged.txt
+head -c 10240 /dev/urandom | base64 >> staged.txt
 git add staged.txt
 
 # untracked 파일 (git_status 테스트용)
@@ -292,8 +302,11 @@ echo "untracked file content" > untracked.txt
 cd "${PROJECT_DIR}"
 
 echo "Git repository created at: ${GIT_REPO_DIR}"
-echo "  - 5 commits"
-echo "  - 2 branches (feature-branch, bugfix-branch)"
+echo "  - 52+ commits"
+echo "  - 50+ source files (10KB each)"
+echo "  - 1 large binary file (1MB)"
+echo "  - Pack files created (git gc)"
+echo "  - 3 branches"
 echo "  - 1 unstaged change"
 echo "  - 1 staged change"
 echo "  - 1 untracked file"
