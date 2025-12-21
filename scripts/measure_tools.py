@@ -1009,10 +1009,12 @@ def measure_cold_start_http(
         if io_ms and not disk_io and not network_io:
             internal_timing["io_ms"] = float(io_ms)
 
+        # Always print timing/memory debug info
+        print(f"    [TIMING] Startup: {startup_ms:.1f}ms, Request: {request_ms:.1f}ms, Total: {total_ms:.1f}ms", flush=True)
+        print(f"    [MEMORY] Peak: {memory_mb:.2f}MB", flush=True)
+
         if os.environ.get("DEBUG"):
             print(f"\n    [DEBUG] HTTP Response Status: {response.status_code}")
-            print(f"    [DEBUG] Startup: {startup_ms:.2f}ms, Request: {request_ms:.2f}ms")
-            print(f"    [DEBUG] Memory: {memory_mb:.2f}MB")
             print(f"    [DEBUG] Timing Headers: {dict(response.headers)}")
             # Show response body for debugging git tools
             try:
