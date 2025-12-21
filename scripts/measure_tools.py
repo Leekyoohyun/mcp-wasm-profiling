@@ -1266,7 +1266,7 @@ async def run_tool_measurement(
             print(f"Test file not found: {test_file}", file=sys.stderr)
             return None
         payload = {"path": str(test_file)}
-        input_size = get_file_size(test_file)
+        # input_size는 아래에서 payload 크기로 자동 계산됨
 
     elif tool_name == "read_media_file":
         img_path = TEST_DATA_DIR / "images" / "test.png"
@@ -1287,7 +1287,7 @@ async def run_tool_measurement(
         content = "x" * size_bytes
         output_path = f"/tmp/wasm_profiler_write_{input_size_label}.txt"
         payload = {"path": output_path, "content": content}
-        input_size = size_bytes
+        # input_size는 아래에서 payload 크기로 자동 계산됨 (content 포함)
 
     elif tool_name == "edit_file":
         test_file = Path("/tmp/wasm_profiler_edit.txt")
@@ -1423,7 +1423,7 @@ async def run_tool_measurement(
         num_lines = int(input_size_label.replace("lines", ""))
         log_content = generate_test_log_content(num_lines)
         payload = {"log_content": log_content, "format_type": "auto"}
-        input_size = len(log_content)
+        # input_size는 아래에서 payload 크기로 자동 계산됨
     elif tool_name in ["filter_entries", "compute_log_statistics", "search_entries", "extract_time_range"]:
         num_lines = int(input_size_label.replace("lines", ""))
         log_content = generate_test_log_content(num_lines)
