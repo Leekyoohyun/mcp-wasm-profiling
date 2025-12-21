@@ -1731,6 +1731,8 @@ Transport modes:
 
     parser.add_argument("--tool", "-t", type=str,
                         help="Specific tool to measure (default: all)")
+    parser.add_argument("--server", "-S", type=str,
+                        help="Measure all tools for a specific server (e.g., filesystem, git, time)")
     parser.add_argument("--transport", "-T", choices=["cli", "http"],
                         default="http", help="Transport mode: cli (stdio) or http (default: http)")
     parser.add_argument("--mode", "-m", choices=["cold", "warm", "both"],
@@ -1765,6 +1767,14 @@ Transport modes:
     # Determine tools and sizes
     if args.tool:
         tools_to_run = [args.tool]
+    elif args.server:
+        # Filter tools by server
+        tools_to_run = [name for name, config in TOOL_CONFIGS.items() if config['server'] == args.server]
+        if not tools_to_run:
+            print(f"Error: No tools found for server '{args.server}'")
+            print(f"Available servers: {sorted(set(c['server'] for c in TOOL_CONFIGS.values()))}")
+            return
+        print(f"Filtering tools for server: {args.server} ({len(tools_to_run)} tools)")
     else:
         tools_to_run = list(TOOL_CONFIGS.keys())
 
@@ -1775,10 +1785,8 @@ Transport modes:
         setup_git_test_repo()
         print()
 
-    if args.tool:
-        tools = [args.tool]
-    else:
-        tools = list(TOOL_CONFIGS.keys())
+    # Use tools_to_run which already handles --tool and --server options
+    tools = tools_to_run
 
     # Determine modes
     if args.mode == "both":
