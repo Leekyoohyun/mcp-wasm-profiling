@@ -149,11 +149,11 @@ TOOL_CONFIGS = {
     "compute_trends": {"server": "data-aggregate", "test_sizes": ["default"], "io_type": "none"},
 
     # ===== log-parser (5 tools) - pure compute =====
-    "parse_logs": {"server": "log-parser", "test_sizes": ["200lines"], "io_type": "none"},
-    "filter_entries": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
-    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
-    "search_entries": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
-    "extract_time_range": {"server": "log-parser", "test_sizes": ["1000lines"], "io_type": "none"},
+    "parse_logs": {"server": "log-parser", "test_sizes": ["200lines", "1000lines", "2000lines"], "io_type": "none"},
+    "filter_entries": {"server": "log-parser", "test_sizes": ["200lines", "1000lines", "2000lines"], "io_type": "none"},
+    "compute_log_statistics": {"server": "log-parser", "test_sizes": ["200lines", "1000lines", "2000lines"], "io_type": "none"},
+    "search_entries": {"server": "log-parser", "test_sizes": ["200lines", "1000lines", "2000lines"], "io_type": "none"},
+    "extract_time_range": {"server": "log-parser", "test_sizes": ["200lines", "1000lines", "2000lines"], "io_type": "none"},
 
     # ===== time (2 tools) - pure compute =====
     "get_current_time": {"server": "time", "test_sizes": ["default"], "io_type": "none"},
